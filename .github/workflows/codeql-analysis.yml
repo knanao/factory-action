@@ -30,13 +30,12 @@ jobs:
     steps:
       - name: Checkout
         id: checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Initialize CodeQL
         id: initialize
         uses: github/codeql-action/init@v4
         with:
-          config-file: .github/codeql/codeql-config.yml
           languages: ${{ matrix.language }}
           source-root: src
 

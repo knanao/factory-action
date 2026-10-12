@@ -13,7 +13,7 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: knanao/factory-action@v1
+      - uses: knanao/factory-action@v0.1.1
         with:
           factory-api-key: ${{ secrets.FACTORY_API_KEY }}
           computer-id: ${{ vars.FACTORY_COMPUTER_ID }}
