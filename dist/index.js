@@ -23400,7 +23400,7 @@ async function delegate(inputs, t, deps) {
         info(`Interrupting running session ${sessionId}: a new push supersedes it`);
         await factory.interrupt(sessionId);
       }
-      if (isPush && tracking.state.sha !== t.pr?.headSha)
+      if (isPush && existing.status === "idle" && tracking.state.sha !== t.pr?.headSha)
         previousSha = tracking.state.sha;
     } else {
       info(`Session ${tracking.state.sid} no longer exists; creating a new one`);
@@ -23710,5 +23710,5 @@ async function run() {
 // src/index.ts
 run();
 
-//# debugId=04B39C0FA04C205864756E2164756E21
+//# debugId=D13F10AF22DE9BC364756E2164756E21
 //# sourceMappingURL=index.js.map

@@ -99,7 +99,12 @@ export async function delegate(
         )
         await factory.interrupt(sessionId)
       }
-      if (isPush && tracking.state.sha !== t.pr?.headSha)
+      // The tracked SHA was sent, not necessarily reviewed before interruption.
+      if (
+        isPush &&
+        existing.status === 'idle' &&
+        tracking.state.sha !== t.pr?.headSha
+      )
         previousSha = tracking.state.sha
     } else {
       core.info(

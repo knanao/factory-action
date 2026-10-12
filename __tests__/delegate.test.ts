@@ -301,30 +301,75 @@ describe('delegate', () => {
     expect(factory.createSession).not.toHaveBeenCalled()
   })
 
-  it('interrupts a running CI session and reviews only new commits', async () => {
-    const { factory, deps } = fakes([tracking('review', 'rev-sid', 'old999')])
-    factory.getSession.mockResolvedValue({
-      sessionId: 'rev-sid',
-      status: 'running'
-    })
-    const t = parseEvent(
-      'pull_request',
-      pullRequestEvent('synchronize'),
-      OWNER,
-      REPO
-    )
+  describe.each(['review', 'security', 'qa'] as const)(
+    '%s CI follow-ups',
+    (mode) => {
+      describe.each(['pull_request', 'pull_request_target'])('%s', (event) => {
+        it.each(['running', 'pending'] as const)(
+          'interrupts a %s session and examines the full PR diff',
+          async (status) => {
+            const { github, factory, deps } = fakes([
+              tracking(mode, 'ci-sid', 'old999')
+            ])
+            factory.getSession.mockResolvedValue({
+              sessionId: 'ci-sid',
+              status
+            })
+            const t = parseEvent(
+              event,
+              pullRequestEvent('synchronize'),
+              OWNER,
+              REPO
+            )
 
-    await delegate(
-      inputs({ mode: 'review', lane: 'review', cwd: '/repo' }),
-      t,
-      deps
-    )
+            const out = await delegate(
+              inputs({ mode, lane: mode, cwd: '/repo' }),
+              t,
+              deps
+            )
 
-    expect(factory.interrupt).toHaveBeenCalledWith('rev-sid')
-    const text = factory.postMessage.mock.calls[0][1]
-    expect(text).toContain('git diff old999...head222')
-    expect(text).toContain('Do not repeat findings')
-  })
+            expect(out).toMatchObject({ sessionId: 'ci-sid', reused: true })
+            expect(factory.createSession).not.toHaveBeenCalled()
+            expect(factory.interrupt).toHaveBeenCalledWith('ci-sid')
+            expect(factory.postMessage.mock.calls[0][0]).toBe('ci-sid')
+            const text = factory.postMessage.mock.calls[0][1]
+            expect(text).toContain('git diff origin/main...head222')
+            expect(text).not.toContain('git diff old999...head222')
+            expect(text).not.toContain('Look only at')
+            expect(github.updateIssueComment.mock.calls[0][1]).toContain(
+              '"sha":"head222"'
+            )
+          }
+        )
+
+        it('examines only new commits after an idle session', async () => {
+          const { factory, deps } = fakes([tracking(mode, 'ci-sid', 'old999')])
+          factory.getSession.mockResolvedValue({
+            sessionId: 'ci-sid',
+            status: 'idle'
+          })
+          const t = parseEvent(
+            event,
+            pullRequestEvent('synchronize'),
+            OWNER,
+            REPO
+          )
+
+          const out = await delegate(
+            inputs({ mode, lane: mode, cwd: '/repo' }),
+            t,
+            deps
+          )
+
+          expect(out).toMatchObject({ sessionId: 'ci-sid', reused: true })
+          expect(factory.interrupt).not.toHaveBeenCalled()
+          const text = factory.postMessage.mock.calls[0][1]
+          expect(text).toContain('Look only at `git diff old999...head222`')
+          expect(text).toContain('Do not repeat findings')
+        })
+      })
+    }
+  )
 
   it('fails clearly when the repo clone cannot be resolved', async () => {
     const { factory, deps } = fakes()
