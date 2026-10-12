@@ -23190,13 +23190,13 @@ Rules:
 3. Never write the phrase "${triggerPhrase}" in anything you post.
 4. If you cannot finish, post a comment on the thread that says what failed and what a person needs to do.
 5. Do not wait for interactive answers. If you need a decision, post the question as a comment on the thread and stop.
-6. Other sessions share the clone in your working directory, so never switch branches or edit files there. Work only in your own git worktree at \`${workspace.path}\`: if it does not exist, run \`git fetch origin\` and create it from the default branch with \`git worktree add -B ${workspace.branch} ${workspace.path} origin/HEAD\`; otherwise \`cd\` into it. Do not push to branches other than the one for this task, except \`factory-evidence\`.
-7. UI changes need before/after evidence. When a PR you open or push to changes anything users see (web, desktop or terminal UI; if unsure, treat it as UI):
+6. Other sessions share the clone in your working directory, so never switch branches or edit files there. Work only in your own git worktree at \`${workspace.path}\`: if it does not exist, run \`git fetch origin\` and create it from the default branch with \`git worktree add -B ${workspace.branch} ${workspace.path} origin/HEAD\`; otherwise \`cd\` into it. Do not push to branches other than the one for this task.
+7. UI changes need before/after evidence inside the PR itself, never on a branch. When a PR you open or push to changes what people see rendered (the app's web, desktop or terminal screens, or output GitHub renders, such as comments, summaries or generated HTML), capture evidence unless a plain diff already shows the effect just as well; if unsure, capture it:
    a. Open the PR as a draft first so it has a number.
-   b. Run the app on the base branch (before) and on your branch (after) and capture the same screen with the same steps, using the Droid Control tools (agent-browser, tuistory, ffmpeg). Do not use /demo, because it waits for approval.
-   c. Use PNG screenshots for static changes. For interactions or transitions, record an MP4 and also make a GIF.
-   d. Commit the files to the orphan branch \`factory-evidence\` under \`<PR number>/\` (create the branch if it does not exist). Never commit evidence to the PR branch.
-   e. Add a "## Before / After" section to the PR body: a table that embeds images and GIFs with \`https://github.com/${repo}/blob/factory-evidence/<path>?raw=true\`, plus links to the MP4 files. Then mark the PR ready with \`gh pr ready\`.
+   b. Evidence must show the real output of the change. Run the app on the base branch (before) and on your branch (after) and capture the same screen with the same steps, using the Droid Control tools (agent-browser, tuistory, ffmpeg). Do not use /demo, because it waits for approval. When the output cannot run for real (GitHub or CI renders it), render the actual output your code produces and state in its caption how it was made. Never invent screens or content the code does not produce.
+   c. Use PNG screenshots for static changes. For interactions or transitions, record an MP4 (under 10 MB) and also make a GIF.
+   d. Upload every file to GitHub's user-attachments storage and embed the URL it returns: \`curl -s "https://uploads.github.com/user-attachments/assets?name=$(basename <file>)&content_type=<mime>&repository_id=$(gh api repos/${repo} --jq .id)" --request POST -H "Authorization: Bearer $(gh auth token)" -H "Accept: application/json" --data-binary "@<file>"\` returns \`{"url": ...}\`. Images, GIFs and videos all render inline from that URL.
+   e. When you open the PR, add a "## Before / After" section to its body: a table embedding the before and after images, GIFs and videos. Then mark the PR ready with \`gh pr ready\`. When you push new commits to an existing PR, post that section as one comment instead. Never commit evidence files to any branch.
    f. If you cannot capture the evidence, leave the PR as a draft and explain in its body why and what a person must do. Never mark a UI PR ready without evidence.`;
 }
 function header(ctx) {
@@ -23264,7 +23264,7 @@ function reviewPrompt(ctx) {
 // src/prompts/qa.ts
 function qaPrompt(ctx) {
   const pr = ctx.pr;
-  return join(`Run QA for pull request #${pr.number}.`, header(ctx), diffSteps(ctx), `First check that \`.factory/skills/qa/SKILL.md\` exists on the PR branch. If it does not, post one comment on #${pr.number} saying QA is not set up yet (a maintainer must run /install-qa interactively once and commit \`.factory/skills/qa*\`), then stop.`, "Otherwise run /qa for the changes in that diff. Do not ask questions; if a flow cannot be run, mark it BLOCKED with the reason.", `Post the report as one comment on #${pr.number}: a pass/fail/blocked table per flow with a short note each. Commit screenshots to the \`factory-evidence\` branch under \`${pr.number}/qa/\` and embed them with \`https://github.com/${ctx.repo}/blob/factory-evidence/<path>?raw=true\`. Do not push commits to the PR branch.`, untrusted("PR description", ctx.body), extraInstructions(ctx.extra));
+  return join(`Run QA for pull request #${pr.number}.`, header(ctx), diffSteps(ctx), `First check that \`.factory/skills/qa/SKILL.md\` exists on the PR branch. If it does not, post one comment on #${pr.number} saying QA is not set up yet (a maintainer must run /install-qa interactively once and commit \`.factory/skills/qa*\`), then stop.`, "Otherwise run /qa for the changes in that diff. Do not ask questions; if a flow cannot be run, mark it BLOCKED with the reason.", `Post the report as one comment on #${pr.number}: a pass/fail/blocked table per flow with a short note each, with the screenshots embedded. Upload each screenshot with the user-attachments command in your rules and embed the URL it returns. Do not push commits to the PR branch.`, untrusted("PR description", ctx.body), extraInstructions(ctx.extra));
 }
 
 // src/prompts/security.ts
@@ -23710,5 +23710,5 @@ async function run() {
 // src/index.ts
 run();
 
-//# debugId=D13F10AF22DE9BC364756E2164756E21
+//# debugId=2A606793BFBC9A5964756E2164756E21
 //# sourceMappingURL=index.js.map

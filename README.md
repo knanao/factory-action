@@ -150,11 +150,11 @@ See [`examples/factory-security-audit.yml`](examples/factory-security-audit.yml)
 
 ### UI changes need before/after evidence
 
-When Droid opens or pushes to a PR that changes UI (web, desktop or terminal), it must:
+When Droid opens or pushes to a PR that changes what people see rendered (the app's web, desktop or terminal screens, or output GitHub renders, such as comments, summaries or generated HTML), it must:
 
-1. Capture the same screen on the base branch (before) and on its branch (after): PNG screenshots, or MP4 plus GIF for interactions.
-2. Commit the files to the orphan branch `factory-evidence` under `<PR number>/`, so they never pollute the PR diff.
-3. Embed them in a **Before / After** section of the PR body. Images use `https://github.com/<owner>/<repo>/blob/factory-evidence/<path>?raw=true`; videos are linked.
+1. Capture the same view before and after: for app screens, run the app on the base branch and on its branch; for output Droid cannot run for real (rendered by GitHub or CI), render the actual output the code produces and caption how it was made. PNG screenshots for static changes, MP4 (under 10 MB) plus GIF for interactions. Skip evidence only when a plain diff shows the effect just as well.
+2. Upload each file to GitHub's user-attachments storage with the computer's `gh` credentials (`https://uploads.github.com/user-attachments/assets`) and embed the returned URL. Images, GIFs and videos all render inline, and nothing lands in any branch, so the PR diff stays clean.
+3. Put the **Before / After** section in the PR body when opening the PR, and post it as a comment when pushing updates to an existing PR.
 4. If the evidence cannot be captured, leave the PR as a **draft** and explain why.
 
 This is enforced through the session's system prompt. It needs the Droid Control tools on the computer, see [Computer setup](#computer-setup).
@@ -210,7 +210,6 @@ This is enforced through the session's system prompt. It needs the Droid Control
    # plus the runtime tools you need: agent-browser (Chromium), tuistory, ffmpeg
    ```
    The app under test must be startable on the computer or reachable, e.g. a staging URL.
-4. **Evidence branch.** Allow the write-back identity to push `factory-evidence`, and exclude that branch from branch protection rules.
 
 ## QA and Droid Control
 

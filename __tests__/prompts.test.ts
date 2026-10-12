@@ -112,9 +112,13 @@ describe('prompts', () => {
   })
 
   it('stops QA when the skill is not installed', () => {
-    expect(
-      buildPrompt('qa', ctx('pull_request', pullRequestEvent('opened')))
-    ).toContain('/install-qa')
+    const qa = buildPrompt(
+      'qa',
+      ctx('pull_request', pullRequestEvent('opened'))
+    )
+    expect(qa).toContain('/install-qa')
+    expect(qa).toContain('user-attachments')
+    expect(qa).not.toContain('factory-evidence')
   })
 
   it('appends workflow instructions and uses the template in custom mode', () => {
@@ -144,7 +148,9 @@ describe('prompts', () => {
       path: '/r.worktrees/task-1',
       branch: 'factory/task-1'
     })
-    expect(rules).toContain('factory-evidence')
+    expect(rules).toContain('user-attachments')
+    expect(rules).not.toContain('factory-evidence')
+    expect(rules).toContain('Never invent screens')
     expect(rules).toContain('Before / After')
     expect(rules).toContain('<!-- factory-droid -->')
     expect(rules).toContain('Never write the phrase "@factory"')
