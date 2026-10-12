@@ -1,0 +1,52 @@
+# Delegate "@factory ..." mentions to Factory Droid.
+#
+# This repository runs its own action (`uses: ./`) instead of a released tag, so
+# a mention here verifies the current sources end to end: comment `@factory <task>`
+# on an issue, a PR or a review thread in knanao/factory-action, and the run
+# shows up under Actions with the session link in the job summary.
+#
+# Needs the secret FACTORY_API_KEY and the variable FACTORY_COMPUTER_ID, and the
+# Droid Computer must have this repository cloned.
+name: Factory
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  issues:
+    types: [opened]
+
+permissions: {}
+
+jobs:
+  delegate:
+    # Outside users never start the job: the run shows up as skipped.
+    if: >-
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
+        github.event.comment.author_association ||
+      github.event.review.author_association ||
+      github.event.issue.author_association) &&
+      contains(github.event.comment.body || github.event.review.body ||
+      github.event.issue.body, '@factory')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    concurrency:
+      group:
+        factory-${{ github.event.issue.number ||
+        github.event.pull_request.number }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Delegate to Factory
+        uses: ./
+        with:
+          factory-api-key: ${{ secrets.FACTORY_API_KEY }}
+          computer-id: ${{ vars.FACTORY_COMPUTER_ID }}
