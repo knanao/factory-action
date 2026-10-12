@@ -257,6 +257,10 @@ bun run all       # format, lint, typecheck, test, bundle dist/
 
 `dist/` is committed. The **Check Transpiled JavaScript** workflow fails if it is stale. Releases follow the [typescript-action](https://github.com/actions/typescript-action) flow: `script/release` tags `vX.Y.Z` and moves the major tag `v1`.
 
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md). To report a security vulnerability, see [SECURITY.md](./SECURITY.md).
+
 ## License
 
 [MIT](./LICENSE)
