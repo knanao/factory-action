@@ -20,7 +20,7 @@ jobs:
       group: factory-qa-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
-      - uses: knanao/factory-action@v0.1.1
+      - uses: knanao/factory-action@v0.1.0
         with:
           factory-api-key: ${{ secrets.FACTORY_API_KEY }}
           computer-id: ${{ vars.FACTORY_COMPUTER_ID }}
