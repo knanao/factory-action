@@ -11,3 +11,8 @@ export const getInput = jest.fn<typeof core.getInput>()
 export const getBooleanInput = jest.fn<typeof core.getBooleanInput>()
 export const setOutput = jest.fn<typeof core.setOutput>()
 export const setFailed = jest.fn<typeof core.setFailed>()
+export const summary = {
+  addHeading: jest.fn().mockReturnThis(),
+  addTable: jest.fn().mockReturnThis(),
+  write: jest.fn().mockResolvedValue(undefined)
+}

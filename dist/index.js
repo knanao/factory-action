@@ -23697,7 +23697,7 @@ async function run() {
         ],
         [
           inputs.lane,
-          `<a href="${outcome.sessionUrl}">${outcome.sessionId}</a>`,
+          outcome.sessionUrl ? `<a href="${outcome.sessionUrl}">${outcome.sessionId}</a>` : outcome.sessionId,
           String(outcome.reused)
         ]
       ]).write();
@@ -23710,5 +23710,5 @@ async function run() {
 // src/index.ts
 run();
 
-//# debugId=2A606793BFBC9A5964756E2164756E21
+//# debugId=EC21C4B43400BD6464756E2164756E21
 //# sourceMappingURL=index.js.map

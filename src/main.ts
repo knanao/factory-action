@@ -38,7 +38,9 @@ export async function run(): Promise<void> {
           ],
           [
             inputs.lane,
-            `<a href="${outcome.sessionUrl}">${outcome.sessionId}</a>`,
+            outcome.sessionUrl
+              ? `<a href="${outcome.sessionUrl}">${outcome.sessionId}</a>`
+              : outcome.sessionId,
             String(outcome.reused)
           ]
         ])
