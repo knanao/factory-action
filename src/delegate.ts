@@ -1,5 +1,4 @@
-import * as core from '@actions/core'
-import { authorize } from './authz.js'
+import { isAuthorized } from './authz.js'
 import { cleanup } from './cleanup.js'
 import { computerName, ensureComputer, isFromEnvironment } from './compute.js'
 import type {
@@ -11,13 +10,14 @@ import type {
 import { resolveCwd, sessionUrl } from './factory.js'
 import type { GitHubApi } from './github.js'
 import type { Inputs } from './inputs.js'
+import { log } from './logger.js'
 import type { Workspace } from './prompts/common.js'
 import type { PromptContext } from './prompts/index.js'
 import { buildPrompt, systemRules } from './prompts/index.js'
 import type { LaneState, TrackingComment } from './state.js'
 import { findTracking, renderTracking } from './state.js'
 import type { SkipReason, Trigger } from './trigger.js'
-import { findCommand, needsAuthorization, precheck } from './trigger.js'
+import { findCommand, precheck } from './trigger.js'
 
 export type FactoryApi = Pick<
   FactoryClient,
@@ -81,7 +81,7 @@ export async function delegate(
 
   const skip = precheck(inputs.mode, t, inputs)
   if (skip) {
-    core.info(`Skipped: ${skip}`)
+    log.info('delegate.skipped', { reason: skip })
     return { skipped: skip }
   }
 
@@ -100,7 +100,7 @@ export async function delegate(
   if (t.reaction) {
     await github
       .addEyes(t.reaction)
-      .catch((err) => core.warning(`Could not add reaction: ${err}`))
+      .catch((err) => log.warning('reaction.add_failed', { error: err }))
   }
 
   const lane = await resolveLane(inputs, t, deps)
@@ -113,7 +113,7 @@ export async function delegate(
   if (!sessionId) {
     sessionId = await openSession(inputs, t, factory, lane)
   } else {
-    core.info(`Reusing session ${sessionId}`)
+    log.info('session.reused', { session_id: sessionId })
   }
 
   const sent = await factory.postMessage(
@@ -122,9 +122,10 @@ export async function delegate(
     inputs.messageTimeoutMs
   )
   if (sent.timedOut) {
-    core.warning(
-      `No response from the messages endpoint within ${inputs.messageTimeoutMs} ms; assuming the message was accepted`
-    )
+    log.warning('message.timeout', {
+      timeout_ms: inputs.messageTimeoutMs,
+      msg: 'assuming the message was accepted'
+    })
   }
 
   const url = sessionUrl(sessionId)
@@ -139,7 +140,7 @@ export async function delegate(
       else await github.createIssueComment(t.number, body)
     } catch (err) {
       // Droid is already working; a missing tracking comment only loses reuse.
-      core.warning(`Could not write the tracking comment: ${err}`)
+      log.warning('tracking.write_failed', { error: err })
     }
   }
 
@@ -150,28 +151,6 @@ export async function delegate(
     reused,
     computerId: lane.computerId
   }
-}
-
-async function isAuthorized(
-  inputs: Inputs,
-  t: Trigger,
-  github: GitHubApi
-): Promise<boolean> {
-  if (!needsAuthorization(t)) return true
-  const authz = await authorize(t.author!, {
-    allowedAssociations: inputs.allowedAssociations,
-    permissionFallback: inputs.permissionFallback,
-    getPermission: (login) => github.getPermission(login)
-  })
-  if (!authz.allowed) {
-    // Stay quiet on the thread to avoid noise for outside users.
-    core.notice(
-      `@${t.author!.login} is not allowed to trigger Droid (${authz.reason})`
-    )
-    return false
-  }
-  core.info(`Authorized @${t.author!.login} (${authz.reason})`)
-  return true
 }
 
 async function resolveLane(
@@ -186,6 +165,11 @@ async function resolveLane(
       deps.github.selfLogin()
     ])
     tracking = findTracking(comments, inputs.lane, self)
+    if (tracking)
+      log.debug('tracking.found', {
+        lane: inputs.lane,
+        session_id: tracking.state.sid
+      })
   }
 
   const key = laneKey(t, deps.runId)
@@ -238,18 +222,18 @@ async function findPrevious(
     existing?.computerId &&
     existing.computerId !== computerId
   ) {
-    core.info(
-      `Session ${existing.sessionId} runs on computer ${existing.computerId}, not ${computerId}; creating a new one`
-    )
+    log.info('session.computer_mismatch', {
+      session_id: existing.sessionId,
+      computer_id: existing.computerId,
+      expected_computer_id: computerId
+    })
     return { existing }
   }
   if (inputs.reuseSession && existing) {
     return { existing, sessionId: existing.sessionId }
   }
   if (!existing) {
-    core.info(
-      `Session ${tracking.state.sid} no longer exists; creating a new one`
-    )
+    log.info('session.missing', { session_id: tracking.state.sid })
   }
   return { existing }
 }
@@ -270,9 +254,10 @@ async function reuseOnEnvironment(
     trackedComputer?.status === 'active' &&
     isFromEnvironment(trackedComputer, inputs.environmentId)
   if (canReuse && existing) return { existing, sessionId: existing.sessionId }
-  core.info(
-    `Tracked Environment session ${state.sid} is no longer on its active computer; creating a new one`
-  )
+  log.info('session.computer_inactive', {
+    session_id: state.sid,
+    tracked_computer_id: state.cid
+  })
   return { existing }
 }
 
@@ -290,9 +275,10 @@ async function interruptUnreused(
     existing.computerId === lane.computerId &&
     existing.status !== 'idle'
   ) {
-    core.info(
-      `Interrupting previous session ${existing.sessionId}: reuse-session is disabled`
-    )
+    log.info('session.interrupted', {
+      session_id: existing.sessionId,
+      reason: 'reuse-session is disabled'
+    })
     await factory.interrupt(existing.sessionId)
   }
 }
@@ -308,9 +294,11 @@ async function supersede(
 ): Promise<string | undefined> {
   if (!sessionId || !existing || !lane.isPush) return undefined
   if (existing.status !== 'idle') {
-    core.info(
-      `Interrupting running session ${sessionId}: a new push supersedes it`
-    )
+    log.info('session.interrupted', {
+      session_id: sessionId,
+      reason: 'superseded by a new push',
+      status: existing.status
+    })
     await factory.interrupt(sessionId)
     return undefined
   }
@@ -330,7 +318,7 @@ async function openSession(
   const session = await factory.createSession(
     sessionRequest(inputs, t, lane, cwd)
   )
-  core.info(`Created session ${session.sessionId}`)
+  log.info('session.created', { session_id: session.sessionId })
   return session.sessionId
 }
 

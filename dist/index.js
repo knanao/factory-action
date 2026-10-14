@@ -18778,6 +18778,9 @@ function setFailed(message) {
   process.exitCode = ExitCode.Failure;
   error(message);
 }
+function debug(message) {
+  issueCommand("debug", {}, message);
+}
 function error(message, properties = {}) {
   issueCommand("error", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
@@ -22864,249 +22867,95 @@ function getOctokit(token, options, ...additionalPlugins) {
   return new GitHubWithPlugins(getOctokitOptions(token, options));
 }
 
-// src/authz.ts
-async function authorize(author, opts) {
-  const association = (author.association ?? "NONE").toUpperCase();
-  if (opts.allowedAssociations.includes(association)) {
-    return { allowed: true, reason: `author_association ${association}` };
+// src/logger.ts
+var SEVERITY = {
+  debug: 10,
+  info: 20,
+  notice: 30,
+  warning: 40,
+  error: 50
+};
+var LEVEL_ENV = "FACTORY_ACTION_LOG_LEVEL";
+var levelOverride;
+function minLogLevel() {
+  if (levelOverride)
+    return levelOverride;
+  const fromEnv = parseLevel(process.env[LEVEL_ENV]);
+  if (fromEnv)
+    return fromEnv;
+  if (process.env.ACTIONS_STEP_DEBUG)
+    return "debug";
+  return "info";
+}
+function parseLevel(value) {
+  const level = (value ?? "").trim().toLowerCase();
+  return Object.keys(SEVERITY).includes(level) ? level : undefined;
+}
+function renderRecord(level, event, fields = {}) {
+  const pairs = [`level=${level}`, `event=${token(event)}`];
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === undefined || value === null)
+      continue;
+    pairs.push(`${token(key)}=${formatValue(value)}`);
   }
-  if (!opts.permissionFallback || !author.login) {
-    return { allowed: false, reason: `author_association ${association}` };
+  return pairs.join(" ");
+}
+function emit(level, event, fields) {
+  if (SEVERITY[level] < SEVERITY[minLogLevel()])
+    return;
+  const line = renderRecord(level, event, fields);
+  if (level === "debug")
+    debug(line);
+  else if (level === "notice")
+    notice(line);
+  else if (level === "warning")
+    warning(line);
+  else if (level === "error")
+    error(line);
+  else
+    info(line);
+}
+var log = {
+  debug(event, fields) {
+    emit("debug", event, fields);
+  },
+  info(event, fields) {
+    emit("info", event, fields);
+  },
+  notice(event, fields) {
+    emit("notice", event, fields);
+  },
+  warning(event, fields) {
+    emit("warning", event, fields);
+  },
+  error(event, fields) {
+    emit("error", event, fields);
   }
-  let permission = "none";
+};
+function token(key) {
+  return key.replace(/[^A-Za-z0-9_.-]/g, "_");
+}
+function formatValue(value) {
+  if (value instanceof Error)
+    return quote(`${value.name}: ${value.message}`);
+  if (typeof value === "string")
+    return quote(value);
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return quote(json(value));
+}
+function json(value) {
   try {
-    permission = await opts.getPermission(author.login);
-  } catch {}
-  const allowed = permission === "admin" || permission === "write";
-  return {
-    allowed,
-    reason: `author_association ${association}, permission ${permission}`
-  };
-}
-
-// src/compute.ts
-import { createHash } from "node:crypto";
-
-// src/factory.ts
-class FactoryApiError extends Error {
-  status;
-  title;
-  detail;
-  constructor(status, title, detail) {
-    super(`Factory API ${status} ${title}: ${detail}`);
-    this.status = status;
-    this.title = title;
-    this.detail = detail;
-    this.name = "FactoryApiError";
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
   }
 }
-
-class FactoryClient {
-  opts;
-  fetch;
-  retryDelayMs;
-  constructor(opts) {
-    this.opts = opts;
-    this.fetch = opts.fetch ?? globalThis.fetch;
-    this.retryDelayMs = opts.retryDelayMs ?? 2000;
-  }
-  async createSession(body) {
-    return this.retryOn429(() => this.request("POST", "/api/v0/sessions", body));
-  }
-  async getSession(sessionId) {
-    return orUndefinedOn404(() => this.request("GET", `/api/v0/sessions/${encodeURIComponent(sessionId)}`));
-  }
-  async interrupt(sessionId) {
-    await this.request("POST", `/api/v0/sessions/${encodeURIComponent(sessionId)}/interrupt`);
-  }
-  async postMessage(sessionId, text, timeoutMs) {
-    const path = `/api/v0/sessions/${encodeURIComponent(sessionId)}/messages`;
-    for (let attempt = 0;; attempt++) {
-      try {
-        const res = await this.request("POST", path, { text }, AbortSignal.timeout(timeoutMs));
-        return { ...res, timedOut: false };
-      } catch (err) {
-        if (isTimeout(err))
-          return { timedOut: true };
-        if (err instanceof FactoryApiError) {
-          if (err.status === 504)
-            return { timedOut: true };
-          if ([500, 502, 503].includes(err.status) && attempt < 1) {
-            await sleep(this.retryDelayMs);
-            continue;
-          }
-        }
-        throw err;
-      }
-    }
-  }
-  async getComputer(computerId) {
-    return this.request("GET", `/api/v0/computers/${encodeURIComponent(computerId)}`);
-  }
-  async findComputer(computerId) {
-    return orUndefinedOn404(() => this.getComputer(computerId));
-  }
-  async getComputerByName(name) {
-    return orUndefinedOn404(() => this.request("GET", `/api/v0/computers/name/${encodeURIComponent(name)}`));
-  }
-  async createComputer(body) {
-    return this.retryOn429(() => this.request("POST", "/api/v0/computers", body));
-  }
-  async listComputers() {
-    const res = await this.request("GET", "/api/v0/computers?includeUnlisted=true");
-    return res.computers ?? [];
-  }
-  async deleteComputer(computerId) {
-    try {
-      await this.request("DELETE", `/api/v0/computers/${encodeURIComponent(computerId)}`);
-      return true;
-    } catch (err) {
-      if (err instanceof FactoryApiError && err.status === 404)
-        return false;
-      throw err;
-    }
-  }
-  async retryOn429(fn) {
-    for (let attempt = 0;; attempt++) {
-      try {
-        return await fn();
-      } catch (err) {
-        if (err instanceof FactoryApiError && err.status === 429 && attempt < 3) {
-          await sleep(this.retryDelayMs * 2 ** attempt);
-          continue;
-        }
-        throw err;
-      }
-    }
-  }
-  async request(method, path, body, signal) {
-    const res = await this.fetch(`${this.opts.baseUrl}${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${this.opts.apiKey}`,
-        Accept: "application/json",
-        ...body === undefined ? {} : { "Content-Type": "application/json" }
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal
-    });
-    const raw = await res.text();
-    if (!res.ok) {
-      let title = res.statusText;
-      let detail = raw.slice(0, 500);
-      try {
-        const e = JSON.parse(raw);
-        title = e.title ?? title;
-        detail = e.detail ?? detail;
-      } catch {}
-      throw new FactoryApiError(res.status, title, detail);
-    }
-    return raw ? JSON.parse(raw) : undefined;
-  }
-}
-function resolveCwd(computer, repo) {
-  const matches = (computer.clonedRepoDirectories ?? []).filter((dir) => dir.replace(/\/+$/, "").split("/").pop()?.toLowerCase() === repo.toLowerCase());
-  return matches.length === 1 ? matches[0] : undefined;
-}
-function sessionUrl(sessionId) {
-  return `https://app.factory.ai/sessions/${encodeURIComponent(sessionId)}`;
-}
-async function orUndefinedOn404(fn) {
-  try {
-    return await fn();
-  } catch (err) {
-    if (err instanceof FactoryApiError && err.status === 404)
-      return;
-    throw err;
-  }
-}
-function isTimeout(err) {
-  const name = err?.name;
-  return name === "TimeoutError" || name === "AbortError";
-}
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// src/compute.ts
-var MAX_NAME = 63;
-var REPO_CHARS = 20;
-function repoPrefix(owner, repo) {
-  const name = slug(repo).slice(0, REPO_CHARS).replace(/-+$/, "") || "repo";
-  return `fa-${name}-${shortHash(`${owner}/${repo}`.toLowerCase())}-`;
-}
-function threadPrefix(owner, repo, number) {
-  return `${repoPrefix(owner, repo)}${number}-`;
-}
-function computerName(owner, repo, key, lane) {
-  const prefix = `${repoPrefix(owner, repo)}${key}-`;
-  let laneSlug = slug(lane);
-  const suffix = `-${shortHash(lane)}`;
-  const room = MAX_NAME - prefix.length - suffix.length;
-  if (room < 1) {
-    throw new Error(`Cannot build a computer name for key '${key}'`);
-  }
-  if (laneSlug.length > room) {
-    laneSlug = laneSlug.slice(0, room).replace(/-+$/, "");
-  }
-  return `${prefix}${laneSlug || "l"}${suffix}`;
-}
-function isFromEnvironment(c, environmentId) {
-  return c.computerSource?.kind === "template" && c.computerSource.templateId === environmentId;
-}
-async function ensureComputer(api, opts) {
-  let computer = await api.getComputerByName(opts.name);
-  if (computer) {
-    info(`Found computer ${opts.name} (${computer.id})`);
-  } else {
-    try {
-      computer = await api.createComputer({
-        name: opts.name,
-        source: {
-          kind: "environment",
-          environmentId: opts.environmentId,
-          isListed: false
-        }
-      });
-      info(`Created computer ${opts.name} (${computer.id})`);
-    } catch (err) {
-      if (!(err instanceof FactoryApiError && err.status === 409))
-        throw err;
-      computer = await api.getComputerByName(opts.name);
-      if (!computer)
-        throw err;
-    }
-  }
-  if (!isFromEnvironment(computer, opts.environmentId)) {
-    throw new Error(`Computer ${opts.name} (${computer.id}) was not created from Environment ${opts.environmentId}. Delete it, or close the issue/PR so the cleanup mode removes it.`);
-  }
-  return waitActive(api, computer, opts);
-}
-async function waitActive(api, computer, opts) {
-  const deadline = Date.now() + opts.timeoutMs;
-  let c = computer;
-  for (;; ) {
-    if (c.status === "active")
-      return c;
-    if (c.status === "error") {
-      await api.deleteComputer(c.id);
-      throw new Error(`Computer ${c.name} (${c.id}) failed to provision and was deleted. Check the Environment build, then retry.`);
-    }
-    if (Date.now() >= deadline) {
-      throw new Error(`Computer ${c.name} (${c.id}) is still ${c.status ?? "provisioning"} after ${Math.round(opts.timeoutMs / 1000)} s. The next run waits for it again.`);
-    }
-    await sleep2(opts.pollMs ?? 2000);
-    c = await api.getComputer(c.id);
-  }
-}
-function slug(value) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
-function shortHash(value) {
-  return createHash("sha256").update(value).digest("hex").slice(0, 6);
-}
-function sleep2(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function quote(value) {
+  if (!/[\s="]/.test(value) && value !== "")
+    return value;
+  return `"${value.replace(/(["\\])/g, "\\$1").replace(/\n/g, "\\n").replace(/\r/g, "\\r")}"`;
 }
 
 // src/trigger.ts
@@ -23299,6 +23148,272 @@ function prose(text) {
 }
 function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// src/authz.ts
+async function isAuthorized(inputs, t, github) {
+  if (!needsAuthorization(t))
+    return true;
+  const authz = await authorize(t.author, {
+    allowedAssociations: inputs.allowedAssociations,
+    permissionFallback: inputs.permissionFallback,
+    getPermission: (login) => github.getPermission(login)
+  });
+  if (!authz.allowed) {
+    log.notice("authz.denied", {
+      author: t.author.login,
+      reason: authz.reason
+    });
+    return false;
+  }
+  log.info("authz.allowed", { author: t.author.login, reason: authz.reason });
+  return true;
+}
+async function authorize(author, opts) {
+  const association = (author.association ?? "NONE").toUpperCase();
+  if (opts.allowedAssociations.includes(association)) {
+    return { allowed: true, reason: `author_association ${association}` };
+  }
+  if (!opts.permissionFallback || !author.login) {
+    return { allowed: false, reason: `author_association ${association}` };
+  }
+  let permission = "none";
+  try {
+    permission = await opts.getPermission(author.login);
+  } catch {}
+  const allowed = permission === "admin" || permission === "write";
+  return {
+    allowed,
+    reason: `author_association ${association}, permission ${permission}`
+  };
+}
+
+// src/compute.ts
+import { createHash } from "node:crypto";
+
+// src/factory.ts
+class FactoryApiError extends Error {
+  status;
+  title;
+  detail;
+  constructor(status, title, detail) {
+    super(`Factory API ${status} ${title}: ${detail}`);
+    this.status = status;
+    this.title = title;
+    this.detail = detail;
+    this.name = "FactoryApiError";
+  }
+}
+
+class FactoryClient {
+  opts;
+  fetch;
+  retryDelayMs;
+  constructor(opts) {
+    this.opts = opts;
+    this.fetch = opts.fetch ?? globalThis.fetch;
+    this.retryDelayMs = opts.retryDelayMs ?? 2000;
+  }
+  async createSession(body) {
+    return this.retryOn429(() => this.request("POST", "/api/v0/sessions", body));
+  }
+  async getSession(sessionId) {
+    return orUndefinedOn404(() => this.request("GET", `/api/v0/sessions/${encodeURIComponent(sessionId)}`));
+  }
+  async interrupt(sessionId) {
+    await this.request("POST", `/api/v0/sessions/${encodeURIComponent(sessionId)}/interrupt`);
+  }
+  async postMessage(sessionId, text, timeoutMs) {
+    const path = `/api/v0/sessions/${encodeURIComponent(sessionId)}/messages`;
+    for (let attempt = 0;; attempt++) {
+      try {
+        const res = await this.request("POST", path, { text }, AbortSignal.timeout(timeoutMs));
+        return { ...res, timedOut: false };
+      } catch (err) {
+        if (isTimeout(err))
+          return { timedOut: true };
+        if (err instanceof FactoryApiError) {
+          if (err.status === 504)
+            return { timedOut: true };
+          if ([500, 502, 503].includes(err.status) && attempt < 1) {
+            await sleep(this.retryDelayMs);
+            continue;
+          }
+        }
+        throw err;
+      }
+    }
+  }
+  async getComputer(computerId) {
+    return this.request("GET", `/api/v0/computers/${encodeURIComponent(computerId)}`);
+  }
+  async findComputer(computerId) {
+    return orUndefinedOn404(() => this.getComputer(computerId));
+  }
+  async getComputerByName(name) {
+    return orUndefinedOn404(() => this.request("GET", `/api/v0/computers/name/${encodeURIComponent(name)}`));
+  }
+  async createComputer(body) {
+    return this.retryOn429(() => this.request("POST", "/api/v0/computers", body));
+  }
+  async listComputers() {
+    const res = await this.request("GET", "/api/v0/computers?includeUnlisted=true");
+    return res.computers ?? [];
+  }
+  async deleteComputer(computerId) {
+    try {
+      await this.request("DELETE", `/api/v0/computers/${encodeURIComponent(computerId)}`);
+      return true;
+    } catch (err) {
+      if (err instanceof FactoryApiError && err.status === 404)
+        return false;
+      throw err;
+    }
+  }
+  async retryOn429(fn) {
+    for (let attempt = 0;; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        if (err instanceof FactoryApiError && err.status === 429 && attempt < 3) {
+          await sleep(this.retryDelayMs * 2 ** attempt);
+          continue;
+        }
+        throw err;
+      }
+    }
+  }
+  async request(method, path, body, signal) {
+    const res = await this.fetch(`${this.opts.baseUrl}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${this.opts.apiKey}`,
+        Accept: "application/json",
+        ...body === undefined ? {} : { "Content-Type": "application/json" }
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal
+    });
+    const raw = await res.text();
+    if (!res.ok) {
+      let title = res.statusText;
+      let detail = raw.slice(0, 500);
+      try {
+        const e = JSON.parse(raw);
+        title = e.title ?? title;
+        detail = e.detail ?? detail;
+      } catch {}
+      throw new FactoryApiError(res.status, title, detail);
+    }
+    return raw ? JSON.parse(raw) : undefined;
+  }
+}
+function resolveCwd(computer, repo) {
+  const matches = (computer.clonedRepoDirectories ?? []).filter((dir) => dir.replace(/\/+$/, "").split("/").pop()?.toLowerCase() === repo.toLowerCase());
+  return matches.length === 1 ? matches[0] : undefined;
+}
+function sessionUrl(sessionId) {
+  return `https://app.factory.ai/sessions/${encodeURIComponent(sessionId)}`;
+}
+async function orUndefinedOn404(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof FactoryApiError && err.status === 404)
+      return;
+    throw err;
+  }
+}
+function isTimeout(err) {
+  const name = err?.name;
+  return name === "TimeoutError" || name === "AbortError";
+}
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// src/compute.ts
+var MAX_NAME = 63;
+var REPO_CHARS = 20;
+function repoPrefix(owner, repo) {
+  const name = slug(repo).slice(0, REPO_CHARS).replace(/-+$/, "") || "repo";
+  return `fa-${name}-${shortHash(`${owner}/${repo}`.toLowerCase())}-`;
+}
+function threadPrefix(owner, repo, number) {
+  return `${repoPrefix(owner, repo)}${number}-`;
+}
+function computerName(owner, repo, key, lane) {
+  const prefix = `${repoPrefix(owner, repo)}${key}-`;
+  let laneSlug = slug(lane);
+  const suffix = `-${shortHash(lane)}`;
+  const room = MAX_NAME - prefix.length - suffix.length;
+  if (room < 1) {
+    throw new Error(`Cannot build a computer name for key '${key}'`);
+  }
+  if (laneSlug.length > room) {
+    laneSlug = laneSlug.slice(0, room).replace(/-+$/, "");
+  }
+  return `${prefix}${laneSlug || "l"}${suffix}`;
+}
+function isFromEnvironment(c, environmentId) {
+  return c.computerSource?.kind === "template" && c.computerSource.templateId === environmentId;
+}
+async function ensureComputer(api, opts) {
+  let computer = await api.getComputerByName(opts.name);
+  if (computer) {
+    log.info("computer.found", { computer_id: computer.id, name: opts.name });
+  } else {
+    try {
+      computer = await api.createComputer({
+        name: opts.name,
+        source: {
+          kind: "environment",
+          environmentId: opts.environmentId,
+          isListed: false
+        }
+      });
+      log.info("computer.created", {
+        computer_id: computer.id,
+        name: opts.name
+      });
+    } catch (err) {
+      if (!(err instanceof FactoryApiError && err.status === 409))
+        throw err;
+      computer = await api.getComputerByName(opts.name);
+      if (!computer)
+        throw err;
+    }
+  }
+  if (!isFromEnvironment(computer, opts.environmentId)) {
+    throw new Error(`Computer ${opts.name} (${computer.id}) was not created from Environment ${opts.environmentId}. Delete it, or close the issue/PR so the cleanup mode removes it.`);
+  }
+  return waitActive(api, computer, opts);
+}
+async function waitActive(api, computer, opts) {
+  const deadline = Date.now() + opts.timeoutMs;
+  let c = computer;
+  for (;; ) {
+    if (c.status === "active")
+      return c;
+    if (c.status === "error") {
+      await api.deleteComputer(c.id);
+      throw new Error(`Computer ${c.name} (${c.id}) failed to provision and was deleted. Check the Environment build, then retry.`);
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`Computer ${c.name} (${c.id}) is still ${c.status ?? "provisioning"} after ${Math.round(opts.timeoutMs / 1000)} s. The next run waits for it again.`);
+    }
+    await sleep2(opts.pollMs ?? 2000);
+    c = await api.getComputer(c.id);
+  }
+}
+function slug(value) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function shortHash(value) {
+  return createHash("sha256").update(value).digest("hex").slice(0, 6);
+}
+function sleep2(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // src/prompts/common.ts
@@ -23507,11 +23622,14 @@ async function cleanup(inputs, t, deps) {
       await factory.interrupt(sid);
     await factory.postMessage(sid, cleanupPrompt(t), inputs.messageTimeoutMs);
     sessions.push(sid);
-    info(`Asked session ${sid} (${tracking.state.lane}) to clean up`);
+    log.info("cleanup.requested", {
+      session_id: sid,
+      lane: tracking.state.lane
+    });
     await closeTracking(deps, tracking, "Closed (cleanup requested)");
   }
   if (sessions.length === 0)
-    info("No sessions to clean up");
+    log.info("cleanup.none", { number: t.number });
   return { sessionId: sessions.join(",") };
 }
 async function cleanupEnvironment(inputs, t, deps) {
@@ -23533,7 +23651,10 @@ async function cleanupEnvironment(inputs, t, deps) {
     await closeTracking(deps, tracking, cleanupStatus(cid, plan, deletion));
   }
   if (plan.targets.size === 0)
-    info("No Environment computers to delete");
+    log.info("cleanup.none", {
+      number: t.number,
+      environment_id: inputs.environmentId
+    });
   if (deletion.failures.length > 0) {
     throw new Error(`Could not delete Environment computers: ${deletion.failures.join(", ")}`);
   }
@@ -23568,7 +23689,10 @@ async function deleteTargets(factory, plan) {
         plan.alreadyAbsent.add(computerId);
     } catch (err) {
       failures.push(computerId);
-      warning(`Could not delete computer ${computerId}: ${err}`);
+      log.warning("cleanup.computer_delete_failed", {
+        computer_id: computerId,
+        error: err
+      });
     }
   }
   return { deleted, failures };
@@ -23591,7 +23715,10 @@ async function closeTracking(deps, tracking, status) {
     runUrl: deps.runUrl,
     status
   });
-  await deps.github.updateIssueComment(tracking.id, body).catch((err) => warning(`Could not update the tracking comment: ${err}`));
+  await deps.github.updateIssueComment(tracking.id, body).catch((err) => log.warning("tracking.update_failed", {
+    session_id: tracking.state.sid,
+    error: err
+  }));
 }
 
 // src/delegate.ts
@@ -23599,7 +23726,7 @@ async function delegate(inputs, t, deps) {
   const { github, factory } = deps;
   const skip = precheck(inputs.mode, t, inputs);
   if (skip) {
-    info(`Skipped: ${skip}`);
+    log.info("delegate.skipped", { reason: skip });
     return { skipped: skip };
   }
   if (inputs.mode === "cleanup") {
@@ -23613,7 +23740,7 @@ async function delegate(inputs, t, deps) {
     return { skipped: "unauthorized" };
   }
   if (t.reaction) {
-    await github.addEyes(t.reaction).catch((err) => warning(`Could not add reaction: ${err}`));
+    await github.addEyes(t.reaction).catch((err) => log.warning("reaction.add_failed", { error: err }));
   }
   const lane = await resolveLane(inputs, t, deps);
   const previous = await findPrevious(inputs, factory, lane);
@@ -23624,11 +23751,14 @@ async function delegate(inputs, t, deps) {
   if (!sessionId) {
     sessionId = await openSession(inputs, t, factory, lane);
   } else {
-    info(`Reusing session ${sessionId}`);
+    log.info("session.reused", { session_id: sessionId });
   }
   const sent = await factory.postMessage(sessionId, buildPrompt(inputs.mode, promptContext(inputs, t, previousSha)), inputs.messageTimeoutMs);
   if (sent.timedOut) {
-    warning(`No response from the messages endpoint within ${inputs.messageTimeoutMs} ms; assuming the message was accepted`);
+    log.warning("message.timeout", {
+      timeout_ms: inputs.messageTimeoutMs,
+      msg: "assuming the message was accepted"
+    });
   }
   const url = sessionUrl(sessionId);
   if (t.number !== undefined) {
@@ -23643,7 +23773,7 @@ async function delegate(inputs, t, deps) {
       else
         await github.createIssueComment(t.number, body);
     } catch (err) {
-      warning(`Could not write the tracking comment: ${err}`);
+      log.warning("tracking.write_failed", { error: err });
     }
   }
   return {
@@ -23654,21 +23784,6 @@ async function delegate(inputs, t, deps) {
     computerId: lane.computerId
   };
 }
-async function isAuthorized(inputs, t, github) {
-  if (!needsAuthorization(t))
-    return true;
-  const authz = await authorize(t.author, {
-    allowedAssociations: inputs.allowedAssociations,
-    permissionFallback: inputs.permissionFallback,
-    getPermission: (login) => github.getPermission(login)
-  });
-  if (!authz.allowed) {
-    notice(`@${t.author.login} is not allowed to trigger Droid (${authz.reason})`);
-    return false;
-  }
-  info(`Authorized @${t.author.login} (${authz.reason})`);
-  return true;
-}
 async function resolveLane(inputs, t, deps) {
   let tracking;
   if (t.number !== undefined) {
@@ -23677,6 +23792,11 @@ async function resolveLane(inputs, t, deps) {
       deps.github.selfLogin()
     ]);
     tracking = findTracking(comments, inputs.lane, self);
+    if (tracking)
+      log.debug("tracking.found", {
+        lane: inputs.lane,
+        session_id: tracking.state.sid
+      });
   }
   const key = laneKey(t, deps.runId);
   const environmentComputer = inputs.environmentId ? await ensureComputer(deps.factory, {
@@ -23712,14 +23832,18 @@ async function findPrevious(inputs, factory, lane) {
     });
   }
   if (inputs.reuseSession && existing?.computerId && existing.computerId !== computerId) {
-    info(`Session ${existing.sessionId} runs on computer ${existing.computerId}, not ${computerId}; creating a new one`);
+    log.info("session.computer_mismatch", {
+      session_id: existing.sessionId,
+      computer_id: existing.computerId,
+      expected_computer_id: computerId
+    });
     return { existing };
   }
   if (inputs.reuseSession && existing) {
     return { existing, sessionId: existing.sessionId };
   }
   if (!existing) {
-    info(`Session ${tracking.state.sid} no longer exists; creating a new one`);
+    log.info("session.missing", { session_id: tracking.state.sid });
   }
   return { existing };
 }
@@ -23728,12 +23852,18 @@ async function reuseOnEnvironment(inputs, factory, state, { existing, computerId
   const canReuse = existing?.computerId === state.cid && existing?.computerId === computerId && trackedComputer?.status === "active" && isFromEnvironment(trackedComputer, inputs.environmentId);
   if (canReuse && existing)
     return { existing, sessionId: existing.sessionId };
-  info(`Tracked Environment session ${state.sid} is no longer on its active computer; creating a new one`);
+  log.info("session.computer_inactive", {
+    session_id: state.sid,
+    tracked_computer_id: state.cid
+  });
   return { existing };
 }
 async function interruptUnreused(inputs, factory, lane, { existing }) {
   if (lane.environmentComputer && !inputs.reuseSession && existing && existing.computerId === lane.computerId && existing.status !== "idle") {
-    info(`Interrupting previous session ${existing.sessionId}: reuse-session is disabled`);
+    log.info("session.interrupted", {
+      session_id: existing.sessionId,
+      reason: "reuse-session is disabled"
+    });
     await factory.interrupt(existing.sessionId);
   }
 }
@@ -23741,7 +23871,11 @@ async function supersede(factory, lane, { existing, sessionId }) {
   if (!sessionId || !existing || !lane.isPush)
     return;
   if (existing.status !== "idle") {
-    info(`Interrupting running session ${sessionId}: a new push supersedes it`);
+    log.info("session.interrupted", {
+      session_id: sessionId,
+      reason: "superseded by a new push",
+      status: existing.status
+    });
     await factory.interrupt(sessionId);
     return;
   }
@@ -23751,7 +23885,7 @@ async function supersede(factory, lane, { existing, sessionId }) {
 async function openSession(inputs, t, factory, lane) {
   const cwd = lane.cwd ?? await resolveRepoDir(factory, lane.computerId, t.repo);
   const session = await factory.createSession(sessionRequest(inputs, t, lane, cwd));
-  info(`Created session ${session.sessionId}`);
+  log.info("session.created", { session_id: session.sessionId });
   return session.sessionId;
 }
 function promptContext(inputs, t, previousSha) {
@@ -23914,7 +24048,10 @@ function getInputs() {
   }
   const autonomyLevel = oneOf("autonomy-level", AUTONOMY_LEVELS, getInput("autonomy-level") || "high");
   if (autonomyLevel !== "high") {
-    warning(`autonomy-level '${autonomyLevel}': unattended sessions hang when Droid needs approval for a high-risk command (e.g. git push)`);
+    log.warning("input.autonomy_below_high", {
+      autonomy_level: autonomyLevel,
+      msg: "unattended sessions hang when Droid needs approval for a high-risk command (e.g. git push)"
+    });
   }
   const computerId = getInput("computer-id");
   const environmentId = getInput("environment-id");
@@ -23980,6 +24117,12 @@ async function run() {
     const inputs = getInputs();
     const { owner, repo } = context2.repo;
     const trigger = parseEvent(context2.eventName, context2.payload, owner, repo);
+    log.info("run.started", {
+      repo: `${owner}/${repo}`,
+      github_event: context2.eventName,
+      mode: inputs.mode,
+      lane: inputs.lane
+    });
     const outcome = await delegate(inputs, trigger, {
       github: createGitHubApi(inputs.githubToken, owner, repo),
       factory: new FactoryClient({
@@ -24011,6 +24154,10 @@ async function run() {
       ]).write();
     }
   } catch (error) {
+    log.error("run.failed", {
+      error,
+      stack: error instanceof Error ? error.stack : undefined
+    });
     setFailed(error instanceof Error ? error.message : String(error));
   }
 }
@@ -24018,5 +24165,5 @@ async function run() {
 // src/index.ts
 run();
 
-//# debugId=68122AEBFE301D5C64756E2164756E21
+//# debugId=361DBDEF5486381A64756E2164756E21
 //# sourceMappingURL=index.js.map

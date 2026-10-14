@@ -1,4 +1,5 @@
 import * as core from '@actions/core'
+import { log } from './logger.js'
 
 const MODES = [
   'mention',
@@ -63,9 +64,10 @@ export function getInputs(): Inputs {
   if (autonomyLevel !== 'high') {
     // Below high, a high-risk command waits for an approval that never comes,
     // and the session stays running (raising it later with PATCH doesn't help).
-    core.warning(
-      `autonomy-level '${autonomyLevel}': unattended sessions hang when Droid needs approval for a high-risk command (e.g. git push)`
-    )
+    log.warning('input.autonomy_below_high', {
+      autonomy_level: autonomyLevel,
+      msg: 'unattended sessions hang when Droid needs approval for a high-risk command (e.g. git push)'
+    })
   }
 
   const computerId = core.getInput('computer-id')

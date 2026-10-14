@@ -1,4 +1,8 @@
-import type { Author } from './trigger.js'
+import type { GitHubApi } from './github.js'
+import type { Inputs } from './inputs.js'
+import { log } from './logger.js'
+import type { Author, Trigger } from './trigger.js'
+import { needsAuthorization } from './trigger.js'
 
 export interface AuthzOptions {
   allowedAssociations: string[]
@@ -10,6 +14,33 @@ export interface AuthzOptions {
 export interface AuthzResult {
   allowed: boolean
   reason: string
+}
+
+/**
+ * The event-level gate: whether the trigger's author may run Droid. Combines
+ * `authorize` with the permission lookup on the GitHub API.
+ */
+export async function isAuthorized(
+  inputs: Inputs,
+  t: Trigger,
+  github: GitHubApi
+): Promise<boolean> {
+  if (!needsAuthorization(t)) return true
+  const authz = await authorize(t.author!, {
+    allowedAssociations: inputs.allowedAssociations,
+    permissionFallback: inputs.permissionFallback,
+    getPermission: (login) => github.getPermission(login)
+  })
+  if (!authz.allowed) {
+    // Stay quiet on the thread to avoid noise for outside users.
+    log.notice('authz.denied', {
+      author: t.author!.login,
+      reason: authz.reason
+    })
+    return false
+  }
+  log.info('authz.allowed', { author: t.author!.login, reason: authz.reason })
+  return true
 }
 
 /**

@@ -1,9 +1,9 @@
-import * as core from '@actions/core'
 import { isFromEnvironment, threadPrefix } from './compute.js'
 import type { Computer, FactoryClient } from './factory.js'
 import { sessionUrl } from './factory.js'
 import type { GitHubApi } from './github.js'
 import type { Inputs } from './inputs.js'
+import { log } from './logger.js'
 import { cleanupPrompt } from './prompts/index.js'
 import type { TrackingComment } from './state.js'
 import { findAllTracking, renderTracking } from './state.js'
@@ -64,10 +64,13 @@ export async function cleanup(
     if (session.status !== 'idle') await factory.interrupt(sid)
     await factory.postMessage(sid, cleanupPrompt(t), inputs.messageTimeoutMs)
     sessions.push(sid)
-    core.info(`Asked session ${sid} (${tracking.state.lane}) to clean up`)
+    log.info('cleanup.requested', {
+      session_id: sid,
+      lane: tracking.state.lane
+    })
     await closeTracking(deps, tracking, 'Closed (cleanup requested)')
   }
-  if (sessions.length === 0) core.info('No sessions to clean up')
+  if (sessions.length === 0) log.info('cleanup.none', { number: t.number })
   return { sessionId: sessions.join(',') }
 }
 
@@ -96,7 +99,11 @@ async function cleanupEnvironment(
     await closeTracking(deps, tracking, cleanupStatus(cid, plan, deletion))
   }
 
-  if (plan.targets.size === 0) core.info('No Environment computers to delete')
+  if (plan.targets.size === 0)
+    log.info('cleanup.none', {
+      number: t.number,
+      environment_id: inputs.environmentId
+    })
   if (deletion.failures.length > 0) {
     throw new Error(
       `Could not delete Environment computers: ${deletion.failures.join(', ')}`
@@ -142,7 +149,10 @@ async function deleteTargets(
       else plan.alreadyAbsent.add(computerId)
     } catch (err) {
       failures.push(computerId)
-      core.warning(`Could not delete computer ${computerId}: ${err}`)
+      log.warning('cleanup.computer_delete_failed', {
+        computer_id: computerId,
+        error: err
+      })
     }
   }
   return { deleted, failures }
@@ -177,9 +187,10 @@ async function closeTracking(
     runUrl: deps.runUrl,
     status
   })
-  await deps.github
-    .updateIssueComment(tracking.id, body)
-    .catch((err) =>
-      core.warning(`Could not update the tracking comment: ${err}`)
-    )
+  await deps.github.updateIssueComment(tracking.id, body).catch((err) =>
+    log.warning('tracking.update_failed', {
+      session_id: tracking.state.sid,
+      error: err
+    })
+  )
 }
