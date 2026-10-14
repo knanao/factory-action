@@ -303,7 +303,7 @@ Droid Control commands need the plugin and its tools on the computer ([Computer 
 
 ## Development
 
-Development uses [Bun](https://bun.com) (version in `.bun-version`) as the package manager, test runner and bundler. The action itself still runs on GitHub's `node24` runtime: `bun build --target=node` bundles it into `dist/index.js`.
+Development uses [Bun](https://bun.com) (version in `.bun-version`) as the package manager, test runner and bundler. The action itself still runs on GitHub's `node24` runtime: `bun build --target=node` bundles it into `dist/index.js`. To develop without installing anything locally, open the repository in the dev container (`.devcontainer/`): it provides the pinned Bun, Node.js 24 and installed dependencies, and works with VS Code Dev Containers, GitHub Codespaces and the Dev Containers CLI.
 
 ```sh
 bun install

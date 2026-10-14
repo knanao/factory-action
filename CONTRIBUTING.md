@@ -14,6 +14,19 @@ bun install
 bun run all   # format, lint, typecheck, test, bundle dist/
 ```
 
+### Dev container
+
+To skip local setup entirely, open the repository in the dev container
+(`.devcontainer/`): its image installs the exact Bun version from `.bun-version`
+plus Node.js 24 (the action's runtime), and the first start runs `bun install`.
+It works with VS Code Dev Containers, GitHub Codespaces and the Dev Containers
+CLI:
+
+```sh
+npm install --global @devcontainers/cli
+devcontainer up --workspace-folder .
+```
+
 ## House rules
 
 - **`dist/` is committed.** The action runs `dist/index.js`, so rebuild and

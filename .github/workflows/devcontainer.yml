@@ -1,0 +1,52 @@
+# Builds and runs the dev container (see .devcontainer/) so it cannot silently
+# break: the workflow builds the image, starts a container, runs the
+# post-create command (bun install) and exercises the toolchain inside it.
+name: Devcontainer
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .devcontainer/**
+      - .bun-version
+      - .dockerignore
+      - .github/workflows/devcontainer.yml
+  push:
+    branches:
+      - main
+    paths:
+      - .devcontainer/**
+      - .bun-version
+      - .dockerignore
+      - .github/workflows/devcontainer.yml
+
+permissions:
+  contents: read
+
+jobs:
+  devcontainer:
+    name: Build and run dev container
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Dev Containers CLI
+        run: npm install --global @devcontainers/cli
+
+      - name: Build and start dev container
+        run: devcontainer up --workspace-folder .
+
+      - name: Verify Bun matches .bun-version
+        run: |
+          pinned="$(cat .bun-version)"
+          installed="$(devcontainer exec --workspace-folder . bun --version)"
+          test "$pinned" = "$installed"
+
+      - name: Typecheck inside dev container
+        run: devcontainer exec --workspace-folder . bun run typecheck
+
+      - name: Test inside dev container
+        run: devcontainer exec --workspace-folder . bun test
