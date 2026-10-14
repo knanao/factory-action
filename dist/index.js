@@ -22884,6 +22884,9 @@ async function authorize(author, opts) {
   };
 }
 
+// src/compute.ts
+import { createHash } from "node:crypto";
+
 // src/factory.ts
 class FactoryApiError extends Error {
   status;
@@ -22908,26 +22911,10 @@ class FactoryClient {
     this.retryDelayMs = opts.retryDelayMs ?? 2000;
   }
   async createSession(body) {
-    for (let attempt = 0;; attempt++) {
-      try {
-        return await this.request("POST", "/api/v0/sessions", body);
-      } catch (err) {
-        if (err instanceof FactoryApiError && err.status === 429 && attempt < 3) {
-          await sleep(this.retryDelayMs * 2 ** attempt);
-          continue;
-        }
-        throw err;
-      }
-    }
+    return this.retryOn429(() => this.request("POST", "/api/v0/sessions", body));
   }
   async getSession(sessionId) {
-    try {
-      return await this.request("GET", `/api/v0/sessions/${encodeURIComponent(sessionId)}`);
-    } catch (err) {
-      if (err instanceof FactoryApiError && err.status === 404)
-        return;
-      throw err;
-    }
+    return orUndefinedOn404(() => this.request("GET", `/api/v0/sessions/${encodeURIComponent(sessionId)}`));
   }
   async interrupt(sessionId) {
     await this.request("POST", `/api/v0/sessions/${encodeURIComponent(sessionId)}/interrupt`);
@@ -22955,6 +22942,42 @@ class FactoryClient {
   }
   async getComputer(computerId) {
     return this.request("GET", `/api/v0/computers/${encodeURIComponent(computerId)}`);
+  }
+  async findComputer(computerId) {
+    return orUndefinedOn404(() => this.getComputer(computerId));
+  }
+  async getComputerByName(name) {
+    return orUndefinedOn404(() => this.request("GET", `/api/v0/computers/name/${encodeURIComponent(name)}`));
+  }
+  async createComputer(body) {
+    return this.retryOn429(() => this.request("POST", "/api/v0/computers", body));
+  }
+  async listComputers() {
+    const res = await this.request("GET", "/api/v0/computers?includeUnlisted=true");
+    return res.computers ?? [];
+  }
+  async deleteComputer(computerId) {
+    try {
+      await this.request("DELETE", `/api/v0/computers/${encodeURIComponent(computerId)}`);
+      return true;
+    } catch (err) {
+      if (err instanceof FactoryApiError && err.status === 404)
+        return false;
+      throw err;
+    }
+  }
+  async retryOn429(fn) {
+    for (let attempt = 0;; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        if (err instanceof FactoryApiError && err.status === 429 && attempt < 3) {
+          await sleep(this.retryDelayMs * 2 ** attempt);
+          continue;
+        }
+        throw err;
+      }
+    }
   }
   async request(method, path, body, signal) {
     const res = await this.fetch(`${this.opts.baseUrl}${path}`, {
@@ -22988,11 +23011,101 @@ function resolveCwd(computer, repo) {
 function sessionUrl(sessionId) {
   return `https://app.factory.ai/sessions/${encodeURIComponent(sessionId)}`;
 }
+async function orUndefinedOn404(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err instanceof FactoryApiError && err.status === 404)
+      return;
+    throw err;
+  }
+}
 function isTimeout(err) {
   const name = err?.name;
   return name === "TimeoutError" || name === "AbortError";
 }
 function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// src/compute.ts
+var MAX_NAME = 63;
+var REPO_CHARS = 20;
+function repoPrefix(owner, repo) {
+  const name = slug(repo).slice(0, REPO_CHARS).replace(/-+$/, "") || "repo";
+  return `fa-${name}-${shortHash(`${owner}/${repo}`.toLowerCase())}-`;
+}
+function threadPrefix(owner, repo, number) {
+  return `${repoPrefix(owner, repo)}${number}-`;
+}
+function computerName(owner, repo, key, lane) {
+  const prefix = `${repoPrefix(owner, repo)}${key}-`;
+  let laneSlug = slug(lane);
+  const suffix = `-${shortHash(lane)}`;
+  const room = MAX_NAME - prefix.length - suffix.length;
+  if (room < 1) {
+    throw new Error(`Cannot build a computer name for key '${key}'`);
+  }
+  if (laneSlug.length > room) {
+    laneSlug = laneSlug.slice(0, room).replace(/-+$/, "");
+  }
+  return `${prefix}${laneSlug || "l"}${suffix}`;
+}
+function isFromEnvironment(c, environmentId) {
+  return c.computerSource?.kind === "template" && c.computerSource.templateId === environmentId;
+}
+async function ensureComputer(api, opts) {
+  let computer = await api.getComputerByName(opts.name);
+  if (computer) {
+    info(`Found computer ${opts.name} (${computer.id})`);
+  } else {
+    try {
+      computer = await api.createComputer({
+        name: opts.name,
+        source: {
+          kind: "environment",
+          environmentId: opts.environmentId,
+          isListed: false
+        }
+      });
+      info(`Created computer ${opts.name} (${computer.id})`);
+    } catch (err) {
+      if (!(err instanceof FactoryApiError && err.status === 409))
+        throw err;
+      computer = await api.getComputerByName(opts.name);
+      if (!computer)
+        throw err;
+    }
+  }
+  if (!isFromEnvironment(computer, opts.environmentId)) {
+    throw new Error(`Computer ${opts.name} (${computer.id}) was not created from Environment ${opts.environmentId}. Delete it, or close the issue/PR so the cleanup mode removes it.`);
+  }
+  return waitActive(api, computer, opts);
+}
+async function waitActive(api, computer, opts) {
+  const deadline = Date.now() + opts.timeoutMs;
+  let c = computer;
+  for (;; ) {
+    if (c.status === "active")
+      return c;
+    if (c.status === "error") {
+      await api.deleteComputer(c.id);
+      throw new Error(`Computer ${c.name} (${c.id}) failed to provision and was deleted. Check the Environment build, then retry.`);
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`Computer ${c.name} (${c.id}) is still ${c.status ?? "provisioning"} after ${Math.round(opts.timeoutMs / 1000)} s. The next run waits for it again.`);
+    }
+    await sleep2(opts.pollMs ?? 2000);
+    c = await api.getComputer(c.id);
+  }
+}
+function slug(value) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+function shortHash(value) {
+  return createHash("sha256").update(value).digest("hex").slice(0, 6);
+}
+function sleep2(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
@@ -23181,6 +23294,12 @@ function escapeRegExp(s) {
 }
 
 // src/prompts/common.ts
+function workspaceRule(w) {
+  if (w.kind === "clone") {
+    return `Your workspace is the clone in your working directory; no other session uses this computer. The clone comes from a snapshot, so run \`git fetch origin\` first. Changes that are already uncommitted when you start come from the environment setup, not from this task: never commit them. Before changing code, run \`git checkout -B ${w.branch} origin/HEAD\`, unless the task tells you to check out a PR. Do not push to branches other than the one for this task.`;
+  }
+  return `Other sessions share the clone in your working directory, so never switch branches or edit files there. Your workspace is your own git worktree at \`${w.path}\`: if it does not exist, run \`git fetch origin\` and create it from the default branch with \`git worktree add -B ${w.branch} ${w.path} origin/HEAD\`; otherwise \`cd\` into it. Do not push to branches other than the one for this task.`;
+}
 function systemRules(repo, triggerPhrase, workspace) {
   return `You are running unattended as a GitHub automation (factory-action) for ${repo}. Nobody watches this session live; people talk to you only through GitHub, and their replies arrive in this same session.
 
@@ -23190,7 +23309,7 @@ Rules:
 3. Never write the phrase "${triggerPhrase}" in anything you post.
 4. If you cannot finish, post a comment on the thread that says what failed and what a person needs to do.
 5. Do not wait for interactive answers. If you need a decision, post the question as a comment on the thread and stop.
-6. Other sessions share the clone in your working directory, so never switch branches or edit files there. Work only in your own git worktree at \`${workspace.path}\`: if it does not exist, run \`git fetch origin\` and create it from the default branch with \`git worktree add -B ${workspace.branch} ${workspace.path} origin/HEAD\`; otherwise \`cd\` into it. Do not push to branches other than the one for this task.
+6. ${workspaceRule(workspace)}
 7. UI changes need before/after evidence inside the PR itself, never on a branch. When a PR you open or push to changes what people see rendered (the app's web, desktop or terminal screens, or output GitHub renders, such as comments, summaries or generated HTML), capture evidence unless a plain diff already shows the effect just as well; if unsure, capture it:
    a. Open the PR as a draft first so it has a number.
    b. Evidence must show the real output of the change. Run the app on the base branch (before) and on your branch (after) and capture the same screen with the same steps, using the Droid Control tools (agent-browser, tuistory, ffmpeg). Do not use /demo, because it waits for approval. When the output cannot run for real (GitHub or CI renders it), render the actual output your code produces and state in its caption how it was made. Never invent screens or content the code does not produce.
@@ -23228,7 +23347,7 @@ function join(...parts) {
 
 // src/prompts/deep-security.ts
 function deepSecurityPrompt(ctx) {
-  return join("Run a deep security audit of the whole repository.", header(ctx), `Triggered by the '${ctx.event}' event. There is no issue or PR for this run, so nobody can answer questions: do not ask any. Where the skill would ask, choose for yourself: the scope is the whole repository at the default branch, and for other choices take the most thorough option the skill offers. Record each choice in the report.`, "In your worktree (fresh from the default branch), run /deep-security-review on the entire repository. Use `.factory/threat-model.md` if it exists, and follow `.factory/skills/security-review-guidelines` if it exists. Validate every finding against the code and drop anything you cannot confirm.", "Write the full report to `~/security-audits/<repo>-<YYYYMMDD>/` on this computer.", `Findings may be unfixed vulnerabilities, so never put their details in issues, PRs, comments, commits or anything else public. Report them only as draft repository security advisories, which only admins and security managers can read:
+  return join("Run a deep security audit of the whole repository.", header(ctx), `Triggered by the '${ctx.event}' event. There is no issue or PR for this run, so nobody can answer questions: do not ask any. Where the skill would ask, choose for yourself: the scope is the whole repository at the default branch, and for other choices take the most thorough option the skill offers. Record each choice in the report.`, "In your workspace (fresh from the default branch), run /deep-security-review on the entire repository. Use `.factory/threat-model.md` if it exists, and follow `.factory/skills/security-review-guidelines` if it exists. Validate every finding against the code and drop anything you cannot confirm.", "Write the full report to `~/security-audits/<repo>-<YYYYMMDD>/` on this computer.", `Findings may be unfixed vulnerabilities, so never put their details in issues, PRs, comments, commits or anything else public. Report them only as draft repository security advisories, which only admins and security managers can read:
 1. List the existing drafts with \`gh api "repos/${ctx.repo}/security-advisories?state=draft" --paginate\` and skip findings already filed.
 2. For each new finding of severity P0 (critical), P1 (high) or P2 (medium), create one draft: write a JSON file and run \`gh api repos/${ctx.repo}/security-advisories --method POST --input <file>\` with \`summary\` ("[P<n>] <short title>"), \`description\` (affected files and lines, impact, how to reproduce, suggested fix), \`severity\`, \`cwe_ids\` when known, and \`vulnerabilities: [{"package": {"ecosystem": "other", "name": "${ctx.repo}"}}]\`.
 3. Keep P3 findings in the report file only.`, `If creating advisories fails (for example, the GitHub credentials lack permission), do not fall back to any public post with details. Instead open one issue titled "Security audit <YYYY-MM-DD>: action needed" that says only that the audit finished, how many findings there are per severity, that advisories could not be created and why, and where the report is on this computer.`, extraInstructions(ctx.extra));
@@ -23240,7 +23359,7 @@ function mentionPrompt(ctx) {
   const login = ctx.author?.login ?? "unknown";
   const view = ctx.isPR ? `gh pr view ${n} --comments` : `gh issue view ${n} --comments`;
   const review = ctx.reviewContext ? join(`The request was left as a review comment on \`${ctx.reviewContext.path}\`${ctx.reviewContext.line ? ` line ${ctx.reviewContext.line}` : ""}. Diff hunk:`, untrusted("diff hunk", ctx.reviewContext.diffHunk)) : "";
-  const changes = ctx.isPR ? `If the request needs code changes, check out the PR in your worktree with \`gh pr checkout ${n}\`, then commit and push to its head branch. If that push is rejected (for example, the PR comes from a fork that does not allow edits from maintainers), push your commits to the branch named in your worktree rule instead, open a PR from it against the PR's base branch, and say so in your reply.` : `If the request needs code changes, create a branch, push it and open a PR that references #${n} (use "Closes #${n}" if it fully resolves the issue).`;
+  const changes = ctx.isPR ? `If the request needs code changes, check out the PR in your workspace with \`gh pr checkout ${n}\`, then commit and push to its head branch. If that push is rejected (for example, the PR comes from a fork that does not allow edits from maintainers), push your commits to the branch named in your workspace rule instead, open a PR from it against the PR's base branch, and say so in your reply.` : `If the request needs code changes, create a branch, push it and open a PR that references #${n} (use "Closes #${n}" if it fully resolves the issue).`;
   const reply = ctx.reviewCommentId ? `When you are done, reply in the review thread you were asked in: write \`{"body": "..."}\` to a JSON file and run \`gh api repos/${ctx.repo}/pulls/${n}/comments/${ctx.reviewCommentId}/replies --method POST --input <file>\`. Keep it to a short summary with links to what you changed.` : `When you are done, reply on #${n} with a short summary and links to what you created.`;
   return join(`@${login} asked you to do something on GitHub.`, header(ctx), `Read the whole thread first with \`${view}\`.`, review, ctx.command ? `The request runs a command: run /${ctx.command}, taking its arguments from the rest of the request.` : "", untrusted(`request from @${login}`, ctx.text), join("Do what the request asks.", changes, reply), extraInstructions(ctx.extra));
 }
@@ -23250,7 +23369,7 @@ function diffSteps(ctx) {
   const pr = ctx.pr;
   const range = ctx.previousSha ? `${ctx.previousSha}...${pr.headSha}` : `origin/${pr.baseRef}...${pr.headSha}`;
   const followUp = ctx.previousSha ? `New commits were pushed since your last run on this PR (at ${ctx.previousSha}). Look only at \`git diff ${range}\`; if that range is unavailable because of a force-push, use \`git diff origin/${pr.baseRef}...${pr.headSha}\`. Do not repeat findings you already posted.` : "";
-  return join(followUp, `In your worktree, check out the PR without taking its branch with \`gh pr checkout ${pr.number} --detach\` and run \`git fetch origin ${pr.baseRef}\`. The diff to examine is \`git diff ${range}\`.`);
+  return join(followUp, `In your workspace, check out the PR without taking its branch with \`gh pr checkout ${pr.number} --detach\` and run \`git fetch origin ${pr.baseRef}\`. The diff to examine is \`git diff ${range}\`.`);
 }
 function postReviewSteps(ctx, labels) {
   const pr = ctx.pr;
@@ -23314,7 +23433,7 @@ function parseState(body) {
     return;
   try {
     const state = JSON.parse(match[1]);
-    if (state.v !== 1 || typeof state.lane !== "string" || typeof state.sid !== "string") {
+    if (state.v !== 1 || typeof state.lane !== "string" || typeof state.sid !== "string" || state.cid !== undefined && typeof state.cid !== "string") {
       return;
     }
     return state;
@@ -23395,28 +23514,57 @@ async function delegate(inputs, t, deps) {
     ]);
     tracking = findTracking(comments, inputs.lane, self);
   }
+  const key = t.number !== undefined ? String(t.number) : `run-${deps.runId}`;
+  const environmentComputer = inputs.environmentId ? await ensureComputer(factory, {
+    name: computerName(t.owner, t.repo, key, inputs.lane),
+    environmentId: inputs.environmentId,
+    timeoutMs: inputs.provisionTimeoutMs
+  }) : undefined;
+  const computerId = environmentComputer?.id ?? inputs.computerId;
+  const cwd = inputs.cwd ? inputs.cwd : environmentComputer ? resolveComputerCwd(environmentComputer, computerId, t.repo) : undefined;
+  const branch = `factory/${inputs.lane}-${key}`;
   let sessionId;
   let previousSha;
-  if (tracking && inputs.reuseSession) {
-    const existing = await factory.getSession(tracking.state.sid);
-    if (existing?.computerId && existing.computerId !== inputs.computerId) {
-      info(`Session ${existing.sessionId} runs on computer ${existing.computerId}, not ${inputs.computerId}; creating a new one`);
-    } else if (existing) {
-      sessionId = existing.sessionId;
-      if (isPush && existing.status !== "idle") {
-        info(`Interrupting running session ${sessionId}: a new push supersedes it`);
-        await factory.interrupt(sessionId);
+  let existing;
+  if (tracking && (inputs.reuseSession || environmentComputer)) {
+    existing = await factory.getSession(tracking.state.sid);
+    if (inputs.reuseSession && environmentComputer) {
+      const trackedComputer = tracking.state.cid ? await factory.findComputer(tracking.state.cid) : undefined;
+      const canReuse = existing?.computerId === tracking.state.cid && existing?.computerId === computerId && trackedComputer?.status === "active" && isFromEnvironment(trackedComputer, inputs.environmentId);
+      if (canReuse && existing) {
+        sessionId = existing.sessionId;
+      } else {
+        info(`Tracked Environment session ${tracking.state.sid} is no longer on its active computer; creating a new one`);
       }
-      if (isPush && existing.status === "idle" && tracking.state.sha !== t.pr?.headSha)
-        previousSha = tracking.state.sha;
-    } else {
+    } else if (inputs.reuseSession && existing?.computerId && existing.computerId !== computerId) {
+      info(`Session ${existing.sessionId} runs on computer ${existing.computerId}, not ${computerId}; creating a new one`);
+    } else if (inputs.reuseSession && existing) {
+      sessionId = existing.sessionId;
+    } else if (!existing) {
       info(`Session ${tracking.state.sid} no longer exists; creating a new one`);
     }
   }
+  if (environmentComputer && !inputs.reuseSession && existing && existing.computerId === computerId && existing.status !== "idle") {
+    info(`Interrupting previous session ${existing.sessionId}: reuse-session is disabled`);
+    await factory.interrupt(existing.sessionId);
+  }
+  if (sessionId && existing) {
+    if (isPush && existing.status !== "idle") {
+      info(`Interrupting running session ${sessionId}: a new push supersedes it`);
+      await factory.interrupt(sessionId);
+    }
+    if (isPush && existing.status === "idle" && tracking?.state.sha !== t.pr?.headSha)
+      previousSha = tracking?.state.sha;
+  }
   const reused = sessionId !== undefined;
   if (!sessionId) {
-    const cwd = inputs.cwd || await resolveRepoDir(factory, inputs.computerId, t.repo);
-    const session = await factory.createSession(sessionRequest(inputs, t, cwd, deps.runId));
+    const sessionCwd = cwd ?? await resolveRepoDir(factory, computerId, t.repo);
+    const workspace = environmentComputer ? { kind: "clone", branch } : {
+      kind: "worktree",
+      path: `${sessionCwd.replace(/\/+$/, "")}.worktrees/${inputs.lane}-${key}`,
+      branch
+    };
+    const session = await factory.createSession(sessionRequest(inputs, t, sessionCwd, deps.runId, computerId, workspace));
     sessionId = session.sessionId;
     info(`Created session ${sessionId}`);
   } else {
@@ -23448,6 +23596,8 @@ async function delegate(inputs, t, deps) {
   const url = sessionUrl(sessionId);
   if (t.number !== undefined) {
     const state = { v: 1, lane: inputs.lane, sid: sessionId };
+    if (environmentComputer)
+      state.cid = environmentComputer.id;
     if (isPush && t.pr)
       state.sha = t.pr.headSha;
     const body = renderTracking(state, {
@@ -23464,12 +23614,14 @@ async function delegate(inputs, t, deps) {
       warning(`Could not write the tracking comment: ${err}`);
     }
   }
-  return { skipped: "", sessionId, sessionUrl: url, reused };
+  return { skipped: "", sessionId, sessionUrl: url, reused, computerId };
 }
 async function cleanup(inputs, t, deps) {
   const { github, factory } = deps;
   if (t.number === undefined)
     return { skipped: "no-trigger" };
+  if (inputs.environmentId)
+    return cleanupEnvironment(inputs, t, deps);
   const [comments, self] = await Promise.all([
     github.listIssueComments(t.number),
     github.selfLogin()
@@ -23497,19 +23649,85 @@ async function cleanup(inputs, t, deps) {
     info("No sessions to clean up");
   return { skipped: "", sessionId: sessions.join(","), reused: true };
 }
+async function cleanupEnvironment(inputs, t, deps) {
+  const { github, factory } = deps;
+  if (t.number === undefined)
+    return { skipped: "no-trigger" };
+  const [comments, self, computers] = await Promise.all([
+    github.listIssueComments(t.number),
+    github.selfLogin(),
+    factory.listComputers()
+  ]);
+  const trackings = findAllTracking(comments, self);
+  const prefix = threadPrefix(t.owner, t.repo, t.number);
+  const targets = new Map(computers.filter((computer) => computer.name.startsWith(prefix) && isFromEnvironment(computer, inputs.environmentId)).map((computer) => [computer.id, computer]));
+  const unmanaged = new Set;
+  const alreadyAbsent = new Set;
+  for (const { state } of trackings) {
+    if (!state.cid || targets.has(state.cid))
+      continue;
+    const computer = await factory.findComputer(state.cid);
+    if (computer?.name.startsWith(prefix) && isFromEnvironment(computer, inputs.environmentId)) {
+      targets.set(computer.id, computer);
+    } else if (!computer) {
+      alreadyAbsent.add(state.cid);
+    } else {
+      unmanaged.add(state.cid);
+    }
+  }
+  const deleted = new Set;
+  const deletionFailures = [];
+  for (const computerId of targets.keys()) {
+    try {
+      if (await factory.deleteComputer(computerId))
+        deleted.add(computerId);
+      else
+        alreadyAbsent.add(computerId);
+    } catch (err) {
+      deletionFailures.push(computerId);
+      warning(`Could not delete computer ${computerId}: ${err}`);
+    }
+  }
+  for (const tracking of trackings) {
+    const cid = tracking.state.cid;
+    if (!cid)
+      continue;
+    const status = cid && deletionFailures.includes(cid) ? "Closed (computer deletion failed)" : unmanaged.has(cid) ? "Closed (computer not managed)" : alreadyAbsent.has(cid) || !deleted.has(cid) && !targets.has(cid) ? "Closed (computer already absent)" : "Closed (computer deleted)";
+    const body = renderTracking(tracking.state, {
+      sessionUrl: sessionUrl(tracking.state.sid),
+      reused: true,
+      runUrl: deps.runUrl,
+      status
+    });
+    await github.updateIssueComment(tracking.id, body).catch((err) => warning(`Could not update the tracking comment: ${err}`));
+  }
+  if (targets.size === 0)
+    info("No Environment computers to delete");
+  if (deletionFailures.length > 0) {
+    throw new Error(`Could not delete Environment computers: ${deletionFailures.join(", ")}`);
+  }
+  return {
+    skipped: "",
+    computerId: [...deleted].join(","),
+    reused: true
+  };
+}
 async function resolveRepoDir(factory, computerId, repo) {
   const computer = await factory.getComputer(computerId);
+  return resolveComputerCwd(computer, computerId, repo);
+}
+function resolveComputerCwd(computer, computerId, repo) {
   const dir = resolveCwd(computer, repo);
   if (!dir) {
     throw new Error(`Could not find a single clone of '${repo}' on computer ${computerId} (cloned: ${(computer.clonedRepoDirectories ?? []).join(", ") || "none"}). Set the 'cwd' input.`);
   }
   return dir;
 }
-function sessionRequest(inputs, t, cwd, runId) {
+function sessionRequest(inputs, t, cwd, runId, computerId, workspace) {
   const repo = `${t.owner}/${t.repo}`;
   const key = t.number !== undefined ? String(t.number) : `run-${runId}`;
   return {
-    computerId: inputs.computerId,
+    computerId,
     cwd,
     sessionSettings: {
       ...inputs.model ? { model: inputs.model } : {},
@@ -23525,10 +23743,7 @@ function sessionRequest(inputs, t, cwd, runId) {
       systemPrompt: {
         type: "preset",
         preset: "droid",
-        append: systemRules(repo, inputs.triggerPhrase, {
-          path: `${cwd.replace(/\/+$/, "")}.worktrees/${inputs.lane}-${key}`,
-          branch: `factory/${inputs.lane}-${key}`
-        })
+        append: systemRules(repo, inputs.triggerPhrase, workspace)
       }
     }
   };
@@ -23626,9 +23841,16 @@ function getInputs() {
   if (autonomyLevel !== "high") {
     warning(`autonomy-level '${autonomyLevel}': unattended sessions hang when Droid needs approval for a high-risk command (e.g. git push)`);
   }
+  const computerId = getInput("computer-id");
+  const environmentId = getInput("environment-id");
+  if (Boolean(computerId) === Boolean(environmentId)) {
+    throw new Error("Set exactly one of the inputs 'computer-id' and 'environment-id'");
+  }
   return {
     factoryApiKey,
-    computerId: getInput("computer-id", { required: true }),
+    computerId,
+    environmentId,
+    provisionTimeoutMs: int("provision-timeout-sec", 300) * 1000,
     mode,
     prompt,
     lane: getInput("lane") || defaultLane(mode),
@@ -23696,16 +23918,19 @@ async function run() {
     setOutput("session-id", outcome.sessionId ?? "");
     setOutput("session-url", outcome.sessionUrl ?? "");
     setOutput("reused", String(outcome.reused ?? false));
-    if (outcome.sessionId) {
+    setOutput("computer-id", outcome.computerId ?? "");
+    if (outcome.sessionId || outcome.computerId) {
       await summary.addHeading("Factory Droid", 3).addTable([
         [
           { data: "Lane", header: true },
           { data: "Session", header: true },
+          { data: "Computer", header: true },
           { data: "Reused", header: true }
         ],
         [
-          inputs.lane,
-          outcome.sessionUrl ? `<a href="${outcome.sessionUrl}">${outcome.sessionId}</a>` : outcome.sessionId,
+          inputs.mode === "cleanup" ? "cleanup" : inputs.lane,
+          outcome.sessionUrl ? `<a href="${outcome.sessionUrl}">${outcome.sessionId}</a>` : outcome.sessionId ?? "",
+          outcome.computerId ?? "",
           String(outcome.reused)
         ]
       ]).write();
@@ -23718,5 +23943,5 @@ async function run() {
 // src/index.ts
 run();
 
-//# debugId=9638256B1AF231D064756E2164756E21
+//# debugId=5373A8072FC2602164756E2164756E21
 //# sourceMappingURL=index.js.map

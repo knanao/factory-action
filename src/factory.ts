@@ -15,7 +15,16 @@ export interface Computer {
   id: string
   name: string
   status?: 'provisioning' | 'active' | 'error'
+  createdAt?: number
+  isListed?: boolean | null
   clonedRepoDirectories?: string[]
+  /** Set for computers created from an Environment: `templateId` is its ID. */
+  computerSource?: { kind: string; templateId?: string } | null
+}
+
+export interface CreateComputerRequest {
+  name: string
+  source: { kind: 'environment'; environmentId: string; isListed: boolean }
 }
 
 export interface SessionSettings {
@@ -68,39 +77,20 @@ export class FactoryClient {
     this.retryDelayMs = opts.retryDelayMs ?? 2000
   }
 
-  /**
-   * There is no idempotency key, so only 429 is retried: the request was
-   * rejected before a session was created.
-   */
   async createSession(body: CreateSessionRequest): Promise<Session> {
-    for (let attempt = 0; ; attempt++) {
-      try {
-        return await this.request<Session>('POST', '/api/v0/sessions', body)
-      } catch (err) {
-        if (
-          err instanceof FactoryApiError &&
-          err.status === 429 &&
-          attempt < 3
-        ) {
-          await sleep(this.retryDelayMs * 2 ** attempt)
-          continue
-        }
-        throw err
-      }
-    }
+    return this.retryOn429(() =>
+      this.request<Session>('POST', '/api/v0/sessions', body)
+    )
   }
 
   /** Returns undefined when the session does not exist (or was deleted). */
   async getSession(sessionId: string): Promise<Session | undefined> {
-    try {
-      return await this.request<Session>(
+    return orUndefinedOn404(() =>
+      this.request<Session>(
         'GET',
         `/api/v0/sessions/${encodeURIComponent(sessionId)}`
       )
-    } catch (err) {
-      if (err instanceof FactoryApiError && err.status === 404) return undefined
-      throw err
-    }
+    )
   }
 
   async interrupt(sessionId: string): Promise<void> {
@@ -149,6 +139,76 @@ export class FactoryClient {
       'GET',
       `/api/v0/computers/${encodeURIComponent(computerId)}`
     )
+  }
+
+  /** Like getComputer, but returns undefined when the computer is gone. */
+  async findComputer(computerId: string): Promise<Computer | undefined> {
+    return orUndefinedOn404(() => this.getComputer(computerId))
+  }
+
+  /** Returns undefined when the caller owns no computer with that name. */
+  async getComputerByName(name: string): Promise<Computer | undefined> {
+    return orUndefinedOn404(() =>
+      this.request<Computer>(
+        'GET',
+        `/api/v0/computers/name/${encodeURIComponent(name)}`
+      )
+    )
+  }
+
+  /**
+   * A name that is already taken is rejected with 409, which callers use to
+   * detect a concurrent create.
+   */
+  async createComputer(body: CreateComputerRequest): Promise<Computer> {
+    return this.retryOn429(() =>
+      this.request<Computer>('POST', '/api/v0/computers', body)
+    )
+  }
+
+  /** The caller's computers, including unlisted ones. */
+  async listComputers(): Promise<Computer[]> {
+    const res = await this.request<{ computers: Computer[] }>(
+      'GET',
+      '/api/v0/computers?includeUnlisted=true'
+    )
+    return res.computers ?? []
+  }
+
+  /** Returns false when the computer was already gone. */
+  async deleteComputer(computerId: string): Promise<boolean> {
+    try {
+      await this.request(
+        'DELETE',
+        `/api/v0/computers/${encodeURIComponent(computerId)}`
+      )
+      return true
+    } catch (err) {
+      if (err instanceof FactoryApiError && err.status === 404) return false
+      throw err
+    }
+  }
+
+  /**
+   * There is no idempotency key, so only 429 is retried: the request was
+   * rejected before anything was created.
+   */
+  private async retryOn429<T>(fn: () => Promise<T>): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await fn()
+      } catch (err) {
+        if (
+          err instanceof FactoryApiError &&
+          err.status === 429 &&
+          attempt < 3
+        ) {
+          await sleep(this.retryDelayMs * 2 ** attempt)
+          continue
+        }
+        throw err
+      }
+    }
   }
 
   private async request<T>(
@@ -205,6 +265,17 @@ export function resolveCwd(
  */
 export function sessionUrl(sessionId: string): string {
   return `https://app.factory.ai/sessions/${encodeURIComponent(sessionId)}`
+}
+
+async function orUndefinedOn404<T>(
+  fn: () => Promise<T>
+): Promise<T | undefined> {
+  try {
+    return await fn()
+  } catch (err) {
+    if (err instanceof FactoryApiError && err.status === 404) return undefined
+    throw err
+  }
 }
 
 function isTimeout(err: unknown): boolean {

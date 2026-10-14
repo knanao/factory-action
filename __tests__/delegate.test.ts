@@ -12,6 +12,7 @@ import { renderTracking } from '../src/state.js'
 
 mock.module('@actions/core', () => core)
 
+const { computerName } = await import('../src/compute.js')
 const { delegate } = await import('../src/delegate.js')
 const { parseEvent } = await import('../src/trigger.js')
 type FactoryApi = import('../src/delegate.js').FactoryApi
@@ -22,6 +23,8 @@ function inputs(overrides: Partial<Inputs> = {}): Inputs {
   return {
     factoryApiKey: 'fk',
     computerId: 'comp-1',
+    environmentId: '',
+    provisionTimeoutMs: 300_000,
     mode: 'mention',
     prompt: '',
     lane: 'task',
@@ -77,7 +80,22 @@ function fakes(
       id: 'comp-1',
       name: 'c',
       clonedRepoDirectories: ['/home/factory-user/projects/widgets']
-    })
+    }),
+    findComputer: jest.fn<FactoryApi['findComputer']>(),
+    getComputerByName: jest
+      .fn<FactoryApi['getComputerByName']>()
+      .mockResolvedValue(undefined),
+    createComputer: jest.fn<FactoryApi['createComputer']>().mockResolvedValue({
+      id: 'env-comp',
+      name: 'env-computer',
+      status: 'active',
+      computerSource: { kind: 'template', templateId: 'env-1' },
+      clonedRepoDirectories: ['/home/factory-user/repos/widgets']
+    }),
+    listComputers: jest.fn<FactoryApi['listComputers']>().mockResolvedValue([]),
+    deleteComputer: jest
+      .fn<FactoryApi['deleteComputer']>()
+      .mockResolvedValue(true)
   }
   return {
     github,
@@ -86,10 +104,10 @@ function fakes(
   }
 }
 
-const tracking = (lane: string, sid: string, sha?: string) => ({
+const tracking = (lane: string, sid: string, sha?: string, cid?: string) => ({
   id: 77,
   body: renderTracking(
-    { v: 1, lane, sid, sha },
+    { v: 1, lane, sid, sha, cid },
     { sessionUrl: 'u', reused: false, runUrl: 'r' }
   ),
   user: { login: SELF }
@@ -185,6 +203,268 @@ describe('delegate', () => {
       expect(github.createIssueComment).not.toHaveBeenCalled()
     }
   )
+
+  it('creates an Environment computer and uses its clone directly', async () => {
+    const { github, factory, deps } = fakes()
+    factory.getComputerByName.mockResolvedValue(undefined)
+    const t = parseEvent(
+      'issue_comment',
+      issueComment('@factory fix the button'),
+      OWNER,
+      REPO
+    )
+
+    const out = await delegate(
+      inputs({
+        computerId: '',
+        environmentId: 'env-1',
+        provisionTimeoutMs: 1000
+      }),
+      t,
+      deps
+    )
+
+    expect(out).toMatchObject({
+      skipped: '',
+      sessionId: 'new-sid',
+      computerId: 'env-comp',
+      reused: false
+    })
+    expect(factory.createComputer).toHaveBeenCalledWith({
+      name: expect.stringMatching(
+        /^fa-widgets-[a-f0-9]{6}-42-task-[a-f0-9]{6}$/
+      ),
+      source: {
+        kind: 'environment',
+        environmentId: 'env-1',
+        isListed: false
+      }
+    })
+    expect(factory.createSession.mock.calls[0][0]).toMatchObject({
+      computerId: 'env-comp',
+      cwd: '/home/factory-user/repos/widgets'
+    })
+    const rules = (
+      factory.createSession.mock.calls[0][0].sessionSettings?.systemPrompt as {
+        append: string
+      }
+    ).append
+    expect(rules).toContain('git fetch origin')
+    expect(rules).toContain('git checkout -B factory/task-42 origin/HEAD')
+    expect(rules).not.toContain('git worktree add')
+    expect(github.createIssueComment.mock.calls[0][1]).toContain(
+      '"cid":"env-comp"'
+    )
+  })
+
+  it('reuses an Environment session only while its computer is active', async () => {
+    const { factory, deps } = fakes([
+      tracking('task', 'old-sid', undefined, 'env-comp')
+    ])
+    const computer = {
+      id: 'env-comp',
+      name: computerName(OWNER, REPO, '42', 'task'),
+      status: 'active' as const,
+      computerSource: { kind: 'template', templateId: 'env-1' },
+      clonedRepoDirectories: ['/home/factory-user/repos/widgets']
+    }
+    factory.getComputerByName.mockResolvedValue(computer)
+    factory.getSession.mockResolvedValue({
+      sessionId: 'old-sid',
+      status: 'running',
+      computerId: 'env-comp'
+    })
+    factory.findComputer.mockResolvedValue(computer)
+    const t = parseEvent(
+      'issue_comment',
+      issueComment('@factory add tests'),
+      OWNER,
+      REPO
+    )
+
+    const out = await delegate(
+      inputs({ computerId: '', environmentId: 'env-1' }),
+      t,
+      deps
+    )
+
+    expect(out).toMatchObject({
+      sessionId: 'old-sid',
+      computerId: 'env-comp',
+      reused: true
+    })
+    expect(factory.findComputer).toHaveBeenCalledWith('env-comp')
+    expect(factory.createSession).not.toHaveBeenCalled()
+  })
+
+  it('interrupts a running Environment session when reuse is disabled', async () => {
+    const { factory, deps } = fakes([
+      tracking('task', 'old-sid', undefined, 'env-comp')
+    ])
+    const computer = {
+      id: 'env-comp',
+      name: computerName(OWNER, REPO, '42', 'task'),
+      status: 'active' as const,
+      computerSource: { kind: 'template', templateId: 'env-1' },
+      clonedRepoDirectories: ['/home/factory-user/repos/widgets']
+    }
+    factory.getComputerByName.mockResolvedValue(computer)
+    factory.getSession.mockResolvedValue({
+      sessionId: 'old-sid',
+      status: 'running',
+      computerId: 'env-comp'
+    })
+    const t = parseEvent(
+      'issue_comment',
+      issueComment('@factory start over'),
+      OWNER,
+      REPO
+    )
+
+    await delegate(
+      inputs({
+        computerId: '',
+        environmentId: 'env-1',
+        reuseSession: false
+      }),
+      t,
+      deps
+    )
+
+    expect(factory.interrupt).toHaveBeenCalledWith('old-sid')
+    expect(factory.createSession).toHaveBeenCalled()
+  })
+
+  it('does not interrupt a session on a deleted Environment computer', async () => {
+    const { factory, deps } = fakes([
+      tracking('task', 'old-sid', undefined, 'old-comp')
+    ])
+    factory.getComputerByName.mockResolvedValue({
+      id: 'env-comp',
+      name: computerName(OWNER, REPO, '42', 'task'),
+      status: 'active',
+      computerSource: { kind: 'template', templateId: 'env-1' },
+      clonedRepoDirectories: ['/home/factory-user/repos/widgets']
+    })
+    factory.getSession.mockResolvedValue({
+      sessionId: 'old-sid',
+      status: 'running',
+      computerId: 'old-comp'
+    })
+    const t = parseEvent(
+      'issue_comment',
+      issueComment('@factory start over'),
+      OWNER,
+      REPO
+    )
+
+    await delegate(
+      inputs({
+        computerId: '',
+        environmentId: 'env-1',
+        reuseSession: false
+      }),
+      t,
+      deps
+    )
+
+    expect(factory.interrupt).not.toHaveBeenCalled()
+    expect(factory.createSession).toHaveBeenCalled()
+  })
+
+  it('creates a new session when the tracked Environment computer is gone', async () => {
+    const { github, factory, deps } = fakes([
+      tracking('task', 'old-sid', undefined, 'old-comp')
+    ])
+    factory.getComputerByName.mockResolvedValue({
+      id: 'env-comp',
+      name: computerName(OWNER, REPO, '42', 'task'),
+      status: 'active',
+      computerSource: { kind: 'template', templateId: 'env-1' },
+      clonedRepoDirectories: ['/home/factory-user/repos/widgets']
+    })
+    factory.getSession.mockResolvedValue({
+      sessionId: 'old-sid',
+      status: 'running',
+      computerId: 'old-comp'
+    })
+    factory.findComputer.mockResolvedValue(undefined)
+    const t = parseEvent(
+      'issue_comment',
+      issueComment('@factory retry'),
+      OWNER,
+      REPO
+    )
+
+    const out = await delegate(
+      inputs({ computerId: '', environmentId: 'env-1' }),
+      t,
+      deps
+    )
+
+    expect(out).toMatchObject({ sessionId: 'new-sid', reused: false })
+    expect(factory.createSession.mock.calls[0][0].computerId).toBe('env-comp')
+    expect(github.updateIssueComment.mock.calls[0][1]).toContain(
+      '"cid":"env-comp"'
+    )
+  })
+
+  it('deletes matching Environment computers on close without messaging sessions', async () => {
+    const { github, factory, deps } = fakes([
+      tracking('task', 'task-sid', undefined, 'env-comp')
+    ])
+    const name = computerName(OWNER, REPO, '7', 'task')
+    factory.listComputers.mockResolvedValue([
+      {
+        id: 'env-comp',
+        name,
+        status: 'active',
+        computerSource: { kind: 'template', templateId: 'env-1' }
+      },
+      {
+        id: 'orphan-comp',
+        name: `${name}-review`,
+        status: 'active',
+        computerSource: { kind: 'template', templateId: 'env-1' }
+      },
+      {
+        id: 'other-env-comp',
+        name,
+        status: 'active',
+        computerSource: { kind: 'template', templateId: 'other-env' }
+      }
+    ])
+    factory.getSession.mockResolvedValue({
+      sessionId: 'task-sid',
+      status: 'running',
+      computerId: 'env-comp'
+    })
+    const t = parseEvent(
+      'pull_request',
+      pullRequestEvent('closed'),
+      OWNER,
+      REPO
+    )
+
+    const out = await delegate(
+      inputs({ mode: 'cleanup', computerId: '', environmentId: 'env-1' }),
+      t,
+      deps
+    )
+
+    expect(out).toMatchObject({
+      skipped: '',
+      computerId: 'env-comp,orphan-comp'
+    })
+    expect(factory.deleteComputer).toHaveBeenCalledTimes(2)
+    expect(factory.deleteComputer).toHaveBeenCalledWith('env-comp')
+    expect(factory.deleteComputer).toHaveBeenCalledWith('orphan-comp')
+    expect(factory.interrupt).not.toHaveBeenCalled()
+    expect(factory.postMessage).not.toHaveBeenCalled()
+    expect(github.updateIssueComment.mock.calls[0][1]).toContain(
+      'Closed (computer deleted)'
+    )
+  })
 
   it('creates a new session when the stored one is on another computer', async () => {
     const { factory, deps } = fakes([tracking('task', 'old-sid')])

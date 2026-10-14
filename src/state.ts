@@ -14,6 +14,8 @@ export interface LaneState {
   sid: string
   /** Last head SHA sent to the session (CI lanes). */
   sha?: string
+  /** Computer the session runs on, when the action created it (Environment mode). */
+  cid?: string
 }
 
 export interface TrackingComment {
@@ -37,7 +39,8 @@ export function parseState(
     if (
       state.v !== 1 ||
       typeof state.lane !== 'string' ||
-      typeof state.sid !== 'string'
+      typeof state.sid !== 'string' ||
+      (state.cid !== undefined && typeof state.cid !== 'string')
     ) {
       return undefined
     }

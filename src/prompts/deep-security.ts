@@ -11,7 +11,7 @@ export function deepSecurityPrompt(ctx: PromptContext): string {
     'Run a deep security audit of the whole repository.',
     header(ctx),
     `Triggered by the '${ctx.event}' event. There is no issue or PR for this run, so nobody can answer questions: do not ask any. Where the skill would ask, choose for yourself: the scope is the whole repository at the default branch, and for other choices take the most thorough option the skill offers. Record each choice in the report.`,
-    'In your worktree (fresh from the default branch), run /deep-security-review on the entire repository. Use `.factory/threat-model.md` if it exists, and follow `.factory/skills/security-review-guidelines` if it exists. Validate every finding against the code and drop anything you cannot confirm.',
+    'In your workspace (fresh from the default branch), run /deep-security-review on the entire repository. Use `.factory/threat-model.md` if it exists, and follow `.factory/skills/security-review-guidelines` if it exists. Validate every finding against the code and drop anything you cannot confirm.',
     'Write the full report to `~/security-audits/<repo>-<YYYYMMDD>/` on this computer.',
     `Findings may be unfixed vulnerabilities, so never put their details in issues, PRs, comments, commits or anything else public. Report them only as draft repository security advisories, which only admins and security managers can read:
 1. List the existing drafts with \`gh api "repos/${ctx.repo}/security-advisories?state=draft" --paginate\` and skip findings already filed.

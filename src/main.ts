@@ -26,21 +26,24 @@ export async function run(): Promise<void> {
     core.setOutput('session-id', outcome.sessionId ?? '')
     core.setOutput('session-url', outcome.sessionUrl ?? '')
     core.setOutput('reused', String(outcome.reused ?? false))
+    core.setOutput('computer-id', outcome.computerId ?? '')
 
-    if (outcome.sessionId) {
+    if (outcome.sessionId || outcome.computerId) {
       await core.summary
         .addHeading('Factory Droid', 3)
         .addTable([
           [
             { data: 'Lane', header: true },
             { data: 'Session', header: true },
+            { data: 'Computer', header: true },
             { data: 'Reused', header: true }
           ],
           [
-            inputs.lane,
+            inputs.mode === 'cleanup' ? 'cleanup' : inputs.lane,
             outcome.sessionUrl
               ? `<a href="${outcome.sessionUrl}">${outcome.sessionId}</a>`
-              : outcome.sessionId,
+              : (outcome.sessionId ?? ''),
+            outcome.computerId ?? '',
             String(outcome.reused)
           ]
         ])

@@ -30,10 +30,17 @@ export interface PromptContext {
  * Rules appended to Droid's default system prompt for every session. Keep
  * them short and unconditional; mode-specific steps go into the message.
  */
-export interface Workspace {
-  /** Git worktree this session works in. */
-  path: string
-  branch: string
+export type Workspace =
+  /** A git worktree of a clone that other sessions share. */
+  | { kind: 'worktree'; path: string; branch: string }
+  /** The clone itself, on a computer that runs only this session. */
+  | { kind: 'clone'; branch: string }
+
+function workspaceRule(w: Workspace): string {
+  if (w.kind === 'clone') {
+    return `Your workspace is the clone in your working directory; no other session uses this computer. The clone comes from a snapshot, so run \`git fetch origin\` first. Changes that are already uncommitted when you start come from the environment setup, not from this task: never commit them. Before changing code, run \`git checkout -B ${w.branch} origin/HEAD\`, unless the task tells you to check out a PR. Do not push to branches other than the one for this task.`
+  }
+  return `Other sessions share the clone in your working directory, so never switch branches or edit files there. Your workspace is your own git worktree at \`${w.path}\`: if it does not exist, run \`git fetch origin\` and create it from the default branch with \`git worktree add -B ${w.branch} ${w.path} origin/HEAD\`; otherwise \`cd\` into it. Do not push to branches other than the one for this task.`
 }
 
 export function systemRules(
@@ -49,7 +56,7 @@ Rules:
 3. Never write the phrase "${triggerPhrase}" in anything you post.
 4. If you cannot finish, post a comment on the thread that says what failed and what a person needs to do.
 5. Do not wait for interactive answers. If you need a decision, post the question as a comment on the thread and stop.
-6. Other sessions share the clone in your working directory, so never switch branches or edit files there. Work only in your own git worktree at \`${workspace.path}\`: if it does not exist, run \`git fetch origin\` and create it from the default branch with \`git worktree add -B ${workspace.branch} ${workspace.path} origin/HEAD\`; otherwise \`cd\` into it. Do not push to branches other than the one for this task.
+6. ${workspaceRule(workspace)}
 7. UI changes need before/after evidence inside the PR itself, never on a branch. When a PR you open or push to changes what people see rendered (the app's web, desktop or terminal screens, or output GitHub renders, such as comments, summaries or generated HTML), capture evidence unless a plain diff already shows the effect just as well; if unsure, capture it:
    a. Open the PR as a draft first so it has a number.
    b. Evidence must show the real output of the change. Run the app on the base branch (before) and on your branch (after) and capture the same screen with the same steps, using the Droid Control tools (agent-browser, tuistory, ffmpeg). Do not use /demo, because it waits for approval. When the output cannot run for real (GitHub or CI renders it), render the actual output your code produces and state in its caption how it was made. Never invent screens or content the code does not produce.

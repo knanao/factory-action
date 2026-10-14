@@ -21,7 +21,7 @@ export function mentionPrompt(ctx: PromptContext): string {
     : ''
 
   const changes = ctx.isPR
-    ? `If the request needs code changes, check out the PR in your worktree with \`gh pr checkout ${n}\`, then commit and push to its head branch. If that push is rejected (for example, the PR comes from a fork that does not allow edits from maintainers), push your commits to the branch named in your worktree rule instead, open a PR from it against the PR's base branch, and say so in your reply.`
+    ? `If the request needs code changes, check out the PR in your workspace with \`gh pr checkout ${n}\`, then commit and push to its head branch. If that push is rejected (for example, the PR comes from a fork that does not allow edits from maintainers), push your commits to the branch named in your workspace rule instead, open a PR from it against the PR's base branch, and say so in your reply.`
     : `If the request needs code changes, create a branch, push it and open a PR that references #${n} (use "Closes #${n}" if it fully resolves the issue).`
 
   const reply = ctx.reviewCommentId

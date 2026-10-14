@@ -157,6 +157,7 @@ describe('prompts', () => {
 
   it('includes the UI evidence rule and loop prevention in the system rules', () => {
     const rules = systemRules('acme/widgets', '@factory', {
+      kind: 'worktree',
       path: '/r.worktrees/task-1',
       branch: 'factory/task-1'
     })
@@ -166,5 +167,17 @@ describe('prompts', () => {
     expect(rules).toContain('Before / After')
     expect(rules).toContain('<!-- factory-droid -->')
     expect(rules).toContain('Never write the phrase "@factory"')
+  })
+
+  it('uses the Environment clone directly without worktree instructions', () => {
+    const rules = systemRules('acme/widgets', '@factory', {
+      kind: 'clone',
+      branch: 'factory/task-42'
+    })
+    expect(rules).toContain('no other session uses this computer')
+    expect(rules).toContain('git fetch origin')
+    expect(rules).toContain('git checkout -B factory/task-42 origin/HEAD')
+    expect(rules).toContain('never commit them')
+    expect(rules).not.toContain('git worktree add')
   })
 })

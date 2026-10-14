@@ -21,7 +21,10 @@ export const DEFAULT_COMMANDS =
 
 export interface Inputs {
   factoryApiKey: string
+  /** Exactly one of computerId and environmentId is set. */
   computerId: string
+  environmentId: string
+  provisionTimeoutMs: number
   mode: Mode
   prompt: string
   lane: string
@@ -65,9 +68,19 @@ export function getInputs(): Inputs {
     )
   }
 
+  const computerId = core.getInput('computer-id')
+  const environmentId = core.getInput('environment-id')
+  if (Boolean(computerId) === Boolean(environmentId)) {
+    throw new Error(
+      "Set exactly one of the inputs 'computer-id' and 'environment-id'"
+    )
+  }
+
   return {
     factoryApiKey,
-    computerId: core.getInput('computer-id', { required: true }),
+    computerId,
+    environmentId,
+    provisionTimeoutMs: int('provision-timeout-sec', 300) * 1000,
     mode,
     prompt,
     lane: core.getInput('lane') || defaultLane(mode),

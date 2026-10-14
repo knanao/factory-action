@@ -16,6 +16,15 @@ bun run all   # format, lint, typecheck, test, bundle dist/
 
 ## Trying the action locally
 
+To run the action against a local (simulated) event, copy `.env.example` to
+`.env` and fill in the required values: Factory API key, a Droid Computer id or
+Environment id, a GitHub PAT and a webhook payload file (`GITHUB_EVENT_PATH`).
+Then run:
+
+```sh
+bun run local-action   # local-action . src/main.ts .env
+```
+
 To run the action end to end without Factory or GitHub credentials, start the
 mock API and send it a sample event:
 

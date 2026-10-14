@@ -1,4 +1,6 @@
-# Removes Droid's worktrees and local branches when an issue or PR closes.
+# For the shared-computer setup: asks Droid to remove worktrees and local
+# branches when an issue or PR closes. Environment mode uses
+# factory-environment-cleanup.yml to delete computers directly.
 # pull_request_target is safe here: the action reads no PR content and checks
 # out nothing, and it also covers PRs from forks.
 name: Factory Cleanup

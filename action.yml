@@ -13,8 +13,20 @@ inputs:
     description: Factory API key. A service account key is recommended.
     required: true
   computer-id:
-    description: ID of the Droid Computer the session runs on.
-    required: true
+    description:
+      ID of the existing Droid Computer (mutually exclusive with
+      environment-id).
+    required: false
+  environment-id:
+    description:
+      Factory Environment used to create one unlisted computer per issue/PR and
+      lane (mutually exclusive with computer-id).
+    required: false
+  provision-timeout-sec:
+    description:
+      Maximum time to wait for an Environment computer to become active.
+    required: false
+    default: '300'
   mode:
     description:
       mention | review | security | deep-security | qa | wiki | custom | cleanup
@@ -109,6 +121,10 @@ outputs:
     description: Link to the session in the Factory web app.
   reused:
     description: true when the message was a follow-up to an existing session.
+  computer-id:
+    description: >-
+      The computer used by the session (in Environment cleanup mode, computers
+      deleted, comma separated).
   skipped:
     description:
       Empty, or why the event was skipped (unauthorized, no-trigger, fork, bot,
