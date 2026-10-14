@@ -1,0 +1,29 @@
+// Development container for factory-action, matching the environment CI
+// uses: Node.js 24 (the action's runtime) plus Bun pinned to .bun-version.
+{
+  "$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.schema.json",
+  "name": "factory-action",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "remoteUser": "node",
+  "customizations": {
+    "vscode": {
+      // Extensions match the toolchain CI enforces: ESLint (flat config in
+      // eslint.config.mjs) and Prettier (.prettierrc.yml), plus GitHub
+      // Actions support for action.yml and the workflows in .github/.
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "GitHub.vscode-github-actions"
+      ],
+      "settings": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.formatOnSave": true
+      }
+    }
+  },
+  // Install dependencies (and confirm the pinned Bun) on container create.
+  "postCreateCommand": "bun --version && bun install --frozen-lockfile"
+}

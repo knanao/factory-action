@@ -1,0 +1,9 @@
+# Keeps the dev container image build context (.devcontainer/Dockerfile)
+# small. Only .bun-version is COPYed into the image.
+.git
+node_modules
+dist
+coverage
+.licenses
+.env
+.DS_Store
