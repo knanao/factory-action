@@ -310,7 +310,28 @@ bun install
 bun run all       # format, lint, typecheck, test, bundle dist/
 ```
 
-To run the action against a local (simulated) event, copy [`.env.example`](./.env.example) to `.env`, fill in the required values (Factory API key, a Droid Computer id or Environment id, a GitHub PAT and a webhook payload file) and run `bun run local-action`. `.env` is gitignored; never commit real keys.
+### Local QA
+
+The action can be exercised end-to-end locally, with no credentials and no network access beyond localhost. [`qa/mock-server.ts`](./qa/mock-server.ts) implements in-memory mocks of the two APIs the action talks to (the Factory Sessions API and the GitHub REST API), and the sample event in [`qa/events/issue-comment.json`](./qa/events/issue-comment.json) carries an `@factory` mention on an issue of the `acme/widgets` demo repository.
+
+```sh
+bun run qa
+```
+
+`bun run qa` runs the action through the real `local-action` CLI against the mocks, twice: the first delivery must take the new-session path (eyes reaction on the comment, session created on the mock Factory API with `cwd` resolved from the mock computer's clone, mention prompt posted, tracking comment with the state marker written to the mock GitHub API), and the second delivery must take the session-reuse path (tracking comment found, session fetched, follow-up posted, comment updated). It prints the same tables `local-action` prints, writes the rendered job summary to `.qa/step-summary.md`, and exits nonzero when any expected interaction is missing. `.qa/` is gitignored.
+
+For a hands-on run, start the mock APIs in one terminal and drive the action from another, as often as you like — repeat deliveries of the same event exercise the session-reuse path:
+
+```sh
+cp .env.example .env
+bun run qa:mock-server          # terminal 1: mocks on 127.0.0.1:8765
+bun run local-action            # terminal 2: reads .env
+curl http://127.0.0.1:8765/__log   # every request the mocks received
+```
+
+[`.env.example`](./.env.example) documents every variable a local run needs and is preconfigured for the mock server. To run against a real Factory account and repository instead, copy it to `.env`, fill in real credentials (Factory API key, a Droid Computer id or Environment id, a GitHub PAT) and point `GITHUB_REPOSITORY`/`GITHUB_EVENT_PATH` at your repository and a payload of it. `.env` is gitignored; never commit real keys.
+
+`bun run local-action` goes through [`qa/local-action.ts`](./qa/local-action.ts), which fixes two `local-action` quirks under Bun: its script runner shadows `node` with a shim that stalls the toolchain, and the `@actions/github` stub captures `GITHUB_API_URL` before `.env` is applied.
 
 `dist/` is committed. The **Check Transpiled JavaScript** workflow fails if it is stale. Releases follow the [typescript-action](https://github.com/actions/typescript-action) flow: `script/release` tags `vX.Y.Z` and updates the corresponding major tag (for `v0.1.0`, that is `v0`).
 

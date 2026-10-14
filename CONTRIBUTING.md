@@ -14,14 +14,13 @@ bun install
 bun run all   # format, lint, typecheck, test, bundle dist/
 ```
 
-To run the action against a local (simulated) event, copy `.env.example` to
-`.env` and fill in the required values: Factory API key, a Droid Computer id or
-Environment id, a GitHub PAT and a webhook payload file (`GITHUB_EVENT_PATH`).
-Then run:
-
-```sh
-bun run local-action   # local-action . src/main.ts .env
-```
+The action can be exercised end-to-end locally with no credentials: `bun run qa`
+runs it through the real `local-action` CLI against the bundled mock APIs in
+`qa/` (mock Factory Sessions API + GitHub REST API), twice per invocation —
+first a new session, then a session reuse — and asserts the API traffic. See the
+Local QA section of `README.md` for the manual, interactive variant
+(`bun run qa:mock-server` plus `bun run local-action` with `.env.example` copied
+to `.env`) and for running against real accounts.
 
 ## House rules
 
@@ -30,6 +29,9 @@ bun run local-action   # local-action . src/main.ts .env
   Transpiled JavaScript** workflow fails if `dist/` is stale.
 - **Add tests for behavior changes.** Tests run with `bun test` and live in
   `__tests__/`, with webhook payload helpers in `__fixtures__/`.
+- **QA the action locally for delegation-flow changes.** `bun run qa` (see
+  Development setup) must stay green; run it before opening a PR that touches
+  the trigger, authz, delegation, session state or prompt code.
 - **Keep the docs in sync.** When you add or change an input, output or mode,
   update both `action.yml` and the tables in `README.md`.
 - **Commit messages** follow the Conventional Commits style used in the history,
