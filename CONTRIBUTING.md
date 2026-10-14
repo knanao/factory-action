@@ -14,6 +14,20 @@ bun install
 bun run all   # format, lint, typecheck, test, bundle dist/
 ```
 
+## Trying the action locally
+
+To run the action end to end without Factory or GitHub credentials, start the
+mock API and send it a sample event:
+
+```sh
+bun run qa:mock &   # mock Factory Sessions API + GitHub REST API on :4010
+bun run qa:run script/qa/events/issue_comment.mention.json
+curl -s http://127.0.0.1:4010/__qa/state   # sessions, prompts, comments
+```
+
+The full scenario list and what to check is in
+[`.factory/skills/qa/SKILL.md`](./.factory/skills/qa/SKILL.md).
+
 ## House rules
 
 - **`dist/` is committed.** The action runs `dist/index.js`, so rebuild and

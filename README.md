@@ -267,6 +267,8 @@ bun install
 bun run all       # format, lint, typecheck, test, bundle dist/
 ```
 
+To run the action end to end offline, against a local mock of the Factory Sessions API and the GitHub REST API, use `bun run qa:mock` and `bun run qa:run <event-file>`. See [`.factory/skills/qa/SKILL.md`](./.factory/skills/qa/SKILL.md) for the scenarios and what to check.
+
 `dist/` is committed. The **Check Transpiled JavaScript** workflow fails if it is stale. Releases follow the [typescript-action](https://github.com/actions/typescript-action) flow: `script/release` tags `vX.Y.Z` and updates the corresponding major tag (for `v0.1.0`, that is `v0`).
 
 ## Contributing

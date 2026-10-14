@@ -31,6 +31,8 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "local-action": "local-action . src/main.ts .env",
+    "qa:mock": "bun script/qa/mock-api.ts",
+    "qa:run": "bun script/qa/run.ts",
     "package": "rm -rf dist && bun build src/index.ts --target=node --format=esm --sourcemap=linked --outdir=dist",
     "test": "bun test",
     "typecheck": "tsc --noEmit",

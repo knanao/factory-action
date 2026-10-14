@@ -1,0 +1,16 @@
+{
+  "action": "created",
+  "repository": { "full_name": "acme/widgets" },
+  "issue": {
+    "number": 42,
+    "html_url": "https://github.com/acme/widgets/issues/42",
+    "title": "Broken button",
+    "body": "Clicking Save does nothing."
+  },
+  "comment": {
+    "id": 1002,
+    "body": "@factory also add a regression test",
+    "user": { "login": "alice", "type": "User" },
+    "author_association": "MEMBER"
+  }
+}
