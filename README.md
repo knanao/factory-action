@@ -310,6 +310,8 @@ bun install
 bun run all       # format, lint, typecheck, test, bundle dist/
 ```
 
+Unit tests live in `__tests__/` and mock the GitHub and Factory boundaries. `__tests__/integration/` goes further: it builds the bundle, runs it as a subprocess against localhost stubs of both APIs and checks the full path a runner takes (inputs, event parsing, authorization, session reuse, prompts, tracking state and outputs). Run it alone with `bun run test:integration`.
+
 `dist/` is committed. The **Check Transpiled JavaScript** workflow fails if it is stale. Releases follow the [typescript-action](https://github.com/actions/typescript-action) flow: `script/release` tags `vX.Y.Z` and updates the corresponding major tag (for `v0.1.0`, that is `v0`).
 
 ## Contributing

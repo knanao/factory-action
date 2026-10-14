@@ -45,6 +45,7 @@ export default [
           allowDefaultProject: [
             '__fixtures__/*.ts',
             '__tests__/*.ts',
+            '__tests__/integration/*.ts',
             'eslint.config.mjs'
           ],
           maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 32
