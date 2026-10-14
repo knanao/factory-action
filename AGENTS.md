@@ -32,6 +32,35 @@ GitHub's `node24` runtime.
 - Tests with coverage (as CI runs them): `bun run ci-test`
 - Rebuild `dist/`: `bun run package` (or `bun run bundle` to format first)
 - Run the action locally: `bun run local-action`
+- Interactive local QA, offline and credential-free: `bun run qa`
+- Standalone mock APIs for manual local runs: `bun run qa:mock-server`
+
+## Interactive QA
+
+`bun run qa` brings the action up and exercises it end-to-end with no
+credentials and no network access beyond localhost, then asserts what happened:
+
+1. It starts the bundled mock APIs (`qa/mock-server.ts`), which imitate the
+   Factory Sessions API and the GitHub REST API, and writes the environment
+   local-action reads to `.qa/env`.
+2. It runs the action through the real `local-action` CLI with the `@factory`
+   mention event in `qa/events/issue-comment.json`. Run 1 must add the eyes
+   reaction, create a session on the mock Factory API (resolving `cwd` from the
+   mock computer's clone), post the mention prompt, and write the tracking
+   comment to the mock GitHub API.
+3. Run 2 re-delivers the same event and must reuse the session: find the
+   tracking comment, fetch the session, post the follow-up, update the comment.
+
+It exits nonzero when an expected interaction is missing and prints the mock
+request log on failure. The rendered job summary lands in `.qa/step-summary.md`
+(`.qa/` is gitignored). For manual, interactive runs, copy `.env.example` to
+`.env`, run `bun run qa:mock-server` in one terminal and `bun run local-action`
+in another as often as you like: repeat deliveries exercise the session-reuse
+path, `GET /__log` shows what the mocks received, and `POST /__reset` clears
+them. `bun run local-action` goes through `qa/local-action.ts`, a wrapper that
+fixes two Bun quirks (bun's script runner shadows `node` with a shim that stalls
+the toolchain, and the `@actions/github` stub captures `GITHUB_API_URL` before
+the dotenv file is applied); see the Local QA section of `README.md`.
 
 ## Project layout
 
@@ -61,6 +90,11 @@ GitHub's `node24` runtime.
   module under test.
 - `examples/` — user-facing example workflows (mention, CI review, cleanup,
   Environment cleanup, QA, security audit, wiki).
+- `qa/` — offline interactive QA: `mock-server.ts` (mock Factory + GitHub APIs),
+  `run.ts` (the `bun run qa` driver), `local-action.ts` (wrapper fixing two Bun
+  quirks in the local-action toolchain), `events/` (sample webhook payload).
+  `__tests__/qa-mock.test.ts` covers the mock server.
+- `.env.example` — documented environment for `bun run local-action`.
 - `dist/` — the committed bundle the action runs. Generated; see below.
 - `script/release` — maintainer release helper (tags `vX.Y.Z` plus the major
   tag).
@@ -113,7 +147,9 @@ Before calling work finished, run:
 
 1. `bun run format:check && bun run lint && bun run typecheck`
 2. `bun test` (plus the focused test file while iterating)
-3. `bun run package` when `src/` changed, and commit the rebuilt `dist/` in the
+3. `bun run qa` for changes to the trigger, authz, delegation, session state,
+   prompt or QA tooling code
+4. `bun run package` when `src/` changed, and commit the rebuilt `dist/` in the
    same change.
 
 `bun run all` covers the same ground with `format:write`. CI runs format, lint,

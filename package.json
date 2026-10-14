@@ -30,8 +30,10 @@
     "format:write": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
-    "local-action": "local-action . src/main.ts .env",
+    "local-action": "bun qa/local-action.ts",
     "package": "rm -rf dist && bun build src/index.ts --target=node --format=esm --sourcemap=linked --outdir=dist",
+    "qa": "bun qa/run.ts",
+    "qa:mock-server": "bun qa/mock-server.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "all": "bun run format:write && bun run lint && bun run typecheck && bun run test && bun run package"
