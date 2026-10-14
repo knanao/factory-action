@@ -1,4 +1,3 @@
-import * as core from '@actions/core'
 import { authorize } from './authz.js'
 import {
   computerName,
@@ -15,6 +14,7 @@ import type {
 import { resolveCwd, sessionUrl } from './factory.js'
 import type { GitHubApi } from './github.js'
 import type { Inputs } from './inputs.js'
+import { log } from './logger.js'
 import type { Workspace } from './prompts/common.js'
 import { buildPrompt, cleanupPrompt, systemRules } from './prompts/index.js'
 import type { LaneState, TrackingComment } from './state.js'
@@ -65,7 +65,7 @@ export async function delegate(
 
   const skip = precheck(inputs.mode, t, inputs)
   if (skip) {
-    core.info(`Skipped: ${skip}`)
+    log.info('delegate.skipped', { reason: skip })
     return { skipped: skip }
   }
 
@@ -80,18 +80,22 @@ export async function delegate(
     })
     if (!authz.allowed) {
       // Stay quiet on the thread to avoid noise for outside users.
-      core.notice(
-        `@${t.author!.login} is not allowed to trigger Droid (${authz.reason})`
-      )
+      log.notice('authz.denied', {
+        author: t.author!.login,
+        reason: authz.reason
+      })
       return { skipped: 'unauthorized' }
     }
-    core.info(`Authorized @${t.author!.login} (${authz.reason})`)
+    log.info('authz.allowed', {
+      author: t.author!.login,
+      reason: authz.reason
+    })
   }
 
   if (t.reaction) {
     await github
       .addEyes(t.reaction)
-      .catch((err) => core.warning(`Could not add reaction: ${err}`))
+      .catch((err) => log.warning('reaction.add_failed', { error: err }))
   }
 
   // A new push supersedes the previous run in this lane.
@@ -104,6 +108,11 @@ export async function delegate(
       github.selfLogin()
     ])
     tracking = findTracking(comments, inputs.lane, self)
+    if (tracking)
+      log.debug('tracking.found', {
+        lane: inputs.lane,
+        session_id: tracking.state.sid
+      })
   }
 
   const key = t.number !== undefined ? String(t.number) : `run-${deps.runId}`
@@ -139,24 +148,25 @@ export async function delegate(
       if (canReuse && existing) {
         sessionId = existing.sessionId
       } else {
-        core.info(
-          `Tracked Environment session ${tracking.state.sid} is no longer on its active computer; creating a new one`
-        )
+        log.info('session.computer_inactive', {
+          session_id: tracking.state.sid,
+          tracked_computer_id: tracking.state.cid
+        })
       }
     } else if (
       inputs.reuseSession &&
       existing?.computerId &&
       existing.computerId !== computerId
     ) {
-      core.info(
-        `Session ${existing.sessionId} runs on computer ${existing.computerId}, not ${computerId}; creating a new one`
-      )
+      log.info('session.computer_mismatch', {
+        session_id: existing.sessionId,
+        computer_id: existing.computerId,
+        expected_computer_id: computerId
+      })
     } else if (inputs.reuseSession && existing) {
       sessionId = existing.sessionId
     } else if (!existing) {
-      core.info(
-        `Session ${tracking.state.sid} no longer exists; creating a new one`
-      )
+      log.info('session.missing', { session_id: tracking.state.sid })
     }
   }
 
@@ -167,17 +177,20 @@ export async function delegate(
     existing.computerId === computerId &&
     existing.status !== 'idle'
   ) {
-    core.info(
-      `Interrupting previous session ${existing.sessionId}: reuse-session is disabled`
-    )
+    log.info('session.interrupted', {
+      session_id: existing.sessionId,
+      reason: 'reuse-session is disabled'
+    })
     await factory.interrupt(existing.sessionId)
   }
 
   if (sessionId && existing) {
     if (isPush && existing.status !== 'idle') {
-      core.info(
-        `Interrupting running session ${sessionId}: a new push supersedes it`
-      )
+      log.info('session.interrupted', {
+        session_id: sessionId,
+        reason: 'superseded by a new push',
+        status: existing.status
+      })
       await factory.interrupt(sessionId)
     }
     // The tracked SHA was sent, not necessarily reviewed before interruption.
@@ -204,9 +217,9 @@ export async function delegate(
       sessionRequest(inputs, t, sessionCwd, deps.runId, computerId, workspace)
     )
     sessionId = session.sessionId
-    core.info(`Created session ${sessionId}`)
+    log.info('session.created', { session_id: sessionId })
   } else {
-    core.info(`Reusing session ${sessionId}`)
+    log.info('session.reused', { session_id: sessionId })
   }
 
   const text = buildPrompt(inputs.mode, {
@@ -238,9 +251,10 @@ export async function delegate(
     inputs.messageTimeoutMs
   )
   if (sent.timedOut) {
-    core.warning(
-      `No response from the messages endpoint within ${inputs.messageTimeoutMs} ms; assuming the message was accepted`
-    )
+    log.warning('message.timeout', {
+      timeout_ms: inputs.messageTimeoutMs,
+      msg: 'assuming the message was accepted'
+    })
   }
 
   const url = sessionUrl(sessionId)
@@ -258,7 +272,7 @@ export async function delegate(
       else await github.createIssueComment(t.number, body)
     } catch (err) {
       // Droid is already working; a missing tracking comment only loses reuse.
-      core.warning(`Could not write the tracking comment: ${err}`)
+      log.warning('tracking.write_failed', { error: err })
     }
   }
 
@@ -286,20 +300,24 @@ async function cleanup(
     if (session.status !== 'idle') await factory.interrupt(sid)
     await factory.postMessage(sid, cleanupPrompt(t), inputs.messageTimeoutMs)
     sessions.push(sid)
-    core.info(`Asked session ${sid} (${tracking.state.lane}) to clean up`)
+    log.info('cleanup.requested', {
+      session_id: sid,
+      lane: tracking.state.lane
+    })
     const body = renderTracking(tracking.state, {
       sessionUrl: sessionUrl(sid),
       reused: true,
       runUrl: deps.runUrl,
       status: 'Closed (cleanup requested)'
     })
-    await github
-      .updateIssueComment(tracking.id, body)
-      .catch((err) =>
-        core.warning(`Could not update the tracking comment: ${err}`)
-      )
+    await github.updateIssueComment(tracking.id, body).catch((err) =>
+      log.warning('tracking.update_failed', {
+        session_id: sid,
+        error: err
+      })
+    )
   }
-  if (sessions.length === 0) core.info('No sessions to clean up')
+  if (sessions.length === 0) log.info('cleanup.none', { number: t.number })
   return { skipped: '', sessionId: sessions.join(','), reused: true }
 }
 
@@ -351,7 +369,10 @@ async function cleanupEnvironment(
       else alreadyAbsent.add(computerId)
     } catch (err) {
       deletionFailures.push(computerId)
-      core.warning(`Could not delete computer ${computerId}: ${err}`)
+      log.warning('cleanup.computer_delete_failed', {
+        computer_id: computerId,
+        error: err
+      })
     }
   }
 
@@ -372,14 +393,19 @@ async function cleanupEnvironment(
       runUrl: deps.runUrl,
       status
     })
-    await github
-      .updateIssueComment(tracking.id, body)
-      .catch((err) =>
-        core.warning(`Could not update the tracking comment: ${err}`)
-      )
+    await github.updateIssueComment(tracking.id, body).catch((err) =>
+      log.warning('tracking.update_failed', {
+        session_id: tracking.state.sid,
+        error: err
+      })
+    )
   }
 
-  if (targets.size === 0) core.info('No Environment computers to delete')
+  if (targets.size === 0)
+    log.info('cleanup.none', {
+      number: t.number,
+      environment_id: inputs.environmentId
+    })
   if (deletionFailures.length > 0) {
     throw new Error(
       `Could not delete Environment computers: ${deletionFailures.join(', ')}`

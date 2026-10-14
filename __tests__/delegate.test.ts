@@ -683,6 +683,8 @@ describe('delegate', () => {
     await expect(
       delegate(inputs({ cwd: '/repo' }), t, deps)
     ).resolves.toMatchObject({ sessionId: 'new-sid' })
-    expect(core.warning).toHaveBeenCalled()
+    expect(core.warning).toHaveBeenCalledWith(
+      expect.stringContaining('level=warning event=tracking.write_failed')
+    )
   })
 })
