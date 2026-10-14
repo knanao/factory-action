@@ -23120,9 +23120,9 @@ function precheck(mode, t, opts) {
     }
     return t.action === "closed" ? undefined : "no-trigger";
   }
-  if (mode === "deep-security") {
+  if (mode === "deep-security" || mode === "wiki") {
     if (!SCHEDULED_EVENTS.includes(t.event)) {
-      throw new Error(`mode 'deep-security' audits the whole repository and supports only ${SCHEDULED_EVENTS.join(", ")}, got '${t.event}'`);
+      throw new Error(`mode '${mode}' works on the whole repository and supports only ${SCHEDULED_EVENTS.join(", ")}, got '${t.event}'`);
     }
     return;
   }
@@ -23272,6 +23272,11 @@ function securityPrompt(ctx) {
   const pr = ctx.pr;
   return join(`Run a security review of pull request #${pr.number}.`, header(ctx), diffSteps(ctx), `Read the existing review comments first so you do not duplicate them: \`gh api repos/${ctx.repo}/pulls/${pr.number}/comments --paginate\`.`, "Run /security-review on that diff only (not the whole repository). Use `.factory/threat-model.md` if it exists, and follow `.factory/skills/security-review-guidelines` if it exists. Validate every finding against the code and drop anything you cannot confirm.", postReviewSteps(ctx, "`[P0] [security]`, `[P1] [security]` or `[P2] [security]`") + " Mention P3 findings only in the summary, not as inline comments.", untrusted("PR description", ctx.body), extraInstructions(ctx.extra));
 }
+
+// src/prompts/wiki.ts
+function wikiPrompt(ctx) {
+  return join("Refresh the wiki of the whole repository.", header(ctx), `Triggered by the '${ctx.event}' event. There is no issue or PR for this run, so nobody can answer questions: do not ask any. Where the skill would ask, choose for yourself: document the whole repository at the default branch, and for other choices take the skill's standard option. Record each choice in the session when you finish.`, "In your worktree (fresh from the default branch), run /wiki on the entire repository. Skip the narrated video overview (wiki-video-gen) unless the additional instructions below ask for it: it is slow and rarely wanted on a schedule.", 'The skill uploads the wiki to the Factory app. Also update GitHub: copy the generated pages into the `droid-wiki/` directory (create it if it does not exist), commit only that directory (message "docs(wiki): refresh droid-wiki (<YYYY-MM-DD>)") and push the commit directly to the default branch. Pushing the wiki pages there is part of the task, so it does not break your worktree rule.', 'If that push is rejected (branch protection, or the default branch moved on), do not force it: push your worktree branch instead, open one pull request titled "docs: refresh droid-wiki" against the default branch with the same changes, and stop there.', "When you are done, clean up after yourself the way the cleanup task would: if the worktree named in your worktree rule exists, `cd` to the shared clone, run `git worktree remove --force <that worktree>`, `git branch -D <its branch>` and `git worktree prune`. A scheduled run has no issue or PR whose close would trigger that for you.", extraInstructions(ctx.extra));
+}
 // src/prompts/cleanup.ts
 function cleanupPrompt(t) {
   const kind = t.isPR ? "Pull request" : "Issue";
@@ -23291,6 +23296,8 @@ function buildPrompt(mode, ctx) {
       return deepSecurityPrompt(ctx);
     case "qa":
       return qaPrompt(ctx);
+    case "wiki":
+      return wikiPrompt(ctx);
     case "cleanup":
       throw new Error("mode 'cleanup' does not build a task prompt");
     case "custom":
@@ -23601,11 +23608,12 @@ var MODES = [
   "security",
   "deep-security",
   "qa",
+  "wiki",
   "custom",
   "cleanup"
 ];
 var AUTONOMY_LEVELS = ["off", "low", "medium", "high"];
-var DEFAULT_COMMANDS = "security-review,deep-security-review,qa,verify,qa-test,demo";
+var DEFAULT_COMMANDS = "security-review,deep-security-review,qa,wiki,verify,qa-test,demo";
 function getInputs() {
   const factoryApiKey = getInput("factory-api-key", { required: true });
   setSecret(factoryApiKey);
@@ -23710,5 +23718,5 @@ async function run() {
 // src/index.ts
 run();
 
-//# debugId=EC21C4B43400BD6464756E2164756E21
+//# debugId=9638256B1AF231D064756E2164756E21
 //# sourceMappingURL=index.js.map

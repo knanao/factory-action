@@ -6,6 +6,7 @@ import { mentionPrompt } from './mention.js'
 import { qaPrompt } from './qa.js'
 import { reviewPrompt } from './review.js'
 import { securityPrompt } from './security.js'
+import { wikiPrompt } from './wiki.js'
 
 export type { PromptContext } from './common.js'
 export { systemRules } from './common.js'
@@ -24,6 +25,8 @@ export function buildPrompt(mode: Mode, ctx: PromptContext): string {
       return deepSecurityPrompt(ctx)
     case 'qa':
       return qaPrompt(ctx)
+    case 'wiki':
+      return wikiPrompt(ctx)
     case 'cleanup':
       throw new Error("mode 'cleanup' does not build a task prompt")
     case 'custom':

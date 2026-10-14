@@ -143,6 +143,18 @@ describe('prompts', () => {
     expect(text).toContain('never put their details in issues')
   })
 
+  it('pushes the refreshed wiki to droid-wiki without a PR', () => {
+    const text = buildPrompt('wiki', ctx('schedule', {}))
+    expect(text).toContain('/wiki on the entire repository')
+    expect(text).toContain('do not ask any')
+    expect(text).toContain('Skip the narrated video overview')
+    expect(text).toContain('`droid-wiki/`')
+    expect(text).toContain('push the commit directly to the default branch')
+    expect(text).toContain('If that push is rejected')
+    expect(text).toContain('docs: refresh droid-wiki')
+    expect(text).toContain('git worktree remove --force')
+  })
+
   it('includes the UI evidence rule and loop prevention in the system rules', () => {
     const rules = systemRules('acme/widgets', '@factory', {
       path: '/r.worktrees/task-1',

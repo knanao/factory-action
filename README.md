@@ -100,13 +100,13 @@ jobs:
           mode: ${{ matrix.mode }}
 ```
 
-More examples are in [examples/](./examples): opt-in QA and a weekly full-repository security audit.
+More examples are in [examples/](./examples): opt-in QA, a weekly full-repository security audit and a weekly wiki refresh.
 
 ## Usage
 
 ### Mentions (`mode: mention`, default)
 
-Any text after `@factory` goes to Droid unchanged. To run a skill or plugin command, name it right after `@factory`, **without a slash**: `@factory verify ...` runs `/verify`. The names that work this way are set by the `commands` input (default: `security-review`, `deep-security-review`, `qa`, `verify`, `qa-test`, `demo`). Any other first word is just part of the request. `review` is left out on purpose: `/review` opens an interactive menu, so `@factory review this PR` is sent as a plain request.
+Any text after `@factory` goes to Droid unchanged. To run a skill or plugin command, name it right after `@factory`, **without a slash**: `@factory verify ...` runs `/verify`. The names that work this way are set by the `commands` input (default: `security-review`, `deep-security-review`, `qa`, `wiki`, `verify`, `qa-test`, `demo`). Any other first word is just part of the request. `review` is left out on purpose: `/review` opens an interactive menu, so `@factory review this PR` is sent as a plain request.
 
 ```text
 @factory implement this issue
@@ -128,6 +128,7 @@ Any text after `@factory` goes to Droid unchanged. To run a skill or plugin comm
 | `review` | `pull_request` | Code review of the diff, posted as one review with up to `max-comments` inline comments labeled `[P0]`–`[P2]` |
 | `security` | `pull_request` | `/security-review` on the diff. Inline `[P0]`–`[P2] [security]` findings; P3 findings go only in the summary |
 | `deep-security` | `schedule`, `workflow_dispatch` | `/deep-security-review` on the whole repository at the default branch. Findings go only to **draft security advisories** (see below) |
+| `wiki` | `schedule`, `workflow_dispatch` | `/wiki` on the whole repository at the default branch. Uploaded to the Factory app, and the same pages pushed to `droid-wiki/` on the default branch (see below) |
 | `qa` | `pull_request` | `/qa` on the changed flows, posted as a pass/fail/blocked report. Opt-in, see [QA](#qa-and-droid-control) |
 | `cleanup` | `issues` / `pull_request_target` (`closed`) | Asks every session tracked on the closed thread to remove its worktree and local branch. Nothing is posted to GitHub. See [Computer setup](#computer-setup) |
 | `custom` | any (e.g. `schedule`) | Sends the `prompt` input with the repository/thread context |
@@ -148,6 +149,16 @@ A full audit with the `deep-security-review` skill can take hours, so it runs on
 
 See [`examples/factory-security-audit.yml`](examples/factory-security-audit.yml).
 
+#### Wiki refresh (`mode: wiki`)
+
+The `wiki` skill generates comprehensive documentation for the whole repository, so it runs on a schedule, not on every push. Each run starts a new session and regenerates the wiki from scratch.
+
+- The skill asks about scope and options. Droid is told to document the whole repository at the default branch and pick the skill's standard options itself.
+- The wiki is uploaded to the Factory app, and the same pages are pushed to `droid-wiki/` directly on the default branch, with no PR. If that push is rejected (for example branch protection), Droid opens one pull request titled "docs: refresh droid-wiki" instead.
+- The narrated video overview (`wiki-video-gen`) is skipped by default; ask for it through the `prompt` input.
+- The session removes its own worktree when it finishes: scheduled runs have no issue or PR whose close would trigger `cleanup`.
+- The computer's push credentials must be allowed to push to the default branch.
+
 ### UI changes need before/after evidence
 
 When Droid opens or pushes to a PR that changes what people see rendered (the app's web, desktop or terminal screens, or output GitHub renders, such as comments, summaries or generated HTML), it must:
@@ -165,14 +176,14 @@ This is enforced through the session's system prompt. It needs the Droid Control
 | --- | --- | --- |
 | `factory-api-key` | **required** | Factory API key (service account recommended) |
 | `computer-id` | **required** | Droid Computer to run the session on |
-| `mode` | `mention` | `mention` \| `review` \| `security` \| `deep-security` \| `qa` \| `custom` \| `cleanup` |
+| `mode` | `mention` | `mention` \| `review` \| `security` \| `deep-security` \| `qa` \| `wiki` \| `custom` \| `cleanup` |
 | `prompt` | `''` | Template for `custom` (required there); extra instructions for the other modes |
 | `lane` | mode (`task` for mention) | Session reuse key per issue/PR |
 | `trigger-phrase` | `@factory` | Mention phrase |
 | `allowed-associations` | `OWNER,MEMBER,COLLABORATOR` | `author_association` values allowed to trigger |
 | `permission-fallback` | `true` | If the association is not allowed, also allow users with write/admin permission (covers private org members) |
 | `allowed-bots` | `''` | Bot logins allowed to trigger |
-| `commands` | `security-review,deep-security-review,qa,verify,qa-test,demo` | Names that `@factory <name>` runs as `/<name>` |
+| `commands` | `security-review,deep-security-review,qa,wiki,verify,qa-test,demo` | Names that `@factory <name>` runs as `/<name>` |
 | `cwd` | auto | Repository path on the computer. Auto-detected from the computer's cloned repositories |
 | `model` | Factory default | Model for new sessions |
 | `reasoning-effort` | Factory default | Reasoning effort for new sessions |
@@ -220,6 +231,7 @@ Skills and Droid Control commands run through mentions, named without a slash (s
 | Code review | built-in skill | Reviews the diff for bugs, security problems and breaking changes | Every PR | `mode: review`, or `@factory review this PR` | Prompt-based. `review` is not a command name, because `/review` opens an interactive menu |
 | `security-review` | built-in skill | Security review of the diff (data flows, authn/authz, injection, …) | Every PR | `mode: security`, or `@factory security-review` | Static analysis; no special requirements |
 | `deep-security-review` | built-in skill | Multi-phase audit of the whole repository | Periodic audits, e.g. weekly | `mode: deep-security` (scheduled), or `@factory deep-security-review` | Can take hours. Findings go to draft security advisories. In a mention, its questions come back as comments |
+| `wiki` | built-in skill | Comprehensive documentation of the whole repository, uploaded to the Factory app | Keeping onboarding docs fresh without writing them by hand | `mode: wiki` (scheduled), or `@factory wiki` | The pages are also pushed to `droid-wiki/` on the default branch. The video overview is skipped by default |
 | `qa` | repository skill | Runs the repository's own QA flows (created by `/install-qa`) against what the PR changed | Every PR, for apps with flows that must not break (login, checkout, …) | `mode: qa` (opt-in), or `@factory qa` | Run `/install-qa` once and commit `.factory/skills/qa*`. The app must be reachable from the computer. Without the skill, Droid posts setup steps and stops |
 | `verify` | Droid Control | Checks **one claim** by running the app, and reports CONFIRMED / REFUTED / INCONCLUSIVE with evidence | "Is this bug really fixed?", "Does this bug report reproduce?" | `@factory verify 1234 -- saving keeps the form values` | Droid acts as an investigator: a refuted claim is a valid result |
 | `qa-test` | Droid Control | Plans and runs test steps against a URL, CLI or Electron app, with a pass/fail table per step | Trying a feature end to end, as a person would by hand. Broader than `verify` | `@factory qa-test https://staging.example.com -- log in, create a project` | Droid designs the steps if none are given. Questions come back as comments; reply with `@factory ...` in the same session |

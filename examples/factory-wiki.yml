@@ -1,0 +1,21 @@
+# Weekly wiki refresh: comprehensive documentation for the whole repository.
+# The wiki is uploaded to the Factory app, and the same pages are pushed to
+# droid-wiki/ on the default branch (a PR only when that push is rejected).
+name: Factory Wiki
+
+on:
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  wiki:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: knanao/factory-action@v0.1.0
+        with:
+          factory-api-key: ${{ secrets.FACTORY_API_KEY }}
+          computer-id: ${{ vars.FACTORY_COMPUTER_ID }}
+          mode: wiki

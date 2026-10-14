@@ -156,35 +156,35 @@ describe('delegate', () => {
     expect(factory.postMessage.mock.calls[0][1]).toContain('run /verify,')
   })
 
-  it('starts a new deep-security session per scheduled run', async () => {
-    const { github, factory, deps } = fakes()
-    const t = parseEvent('schedule', {}, OWNER, REPO)
+  it.each([
+    ['deep-security', '/deep-security-review'],
+    ['wiki', '/wiki']
+  ] as const)(
+    'starts a new %s session per scheduled run',
+    async (mode, skill) => {
+      const { github, factory, deps } = fakes()
+      const t = parseEvent('schedule', {}, OWNER, REPO)
 
-    const out = await delegate(
-      inputs({ mode: 'deep-security', lane: 'deep-security' }),
-      t,
-      deps
-    )
+      const out = await delegate(inputs({ mode, lane: mode }), t, deps)
 
-    expect(out).toMatchObject({ skipped: '', sessionId: 'new-sid' })
-    expect(
-      factory.createSession.mock.calls[0][0].sessionSettings?.tags
-    ).toEqual([
-      {
-        name: 'factory-action',
-        metadata: {
-          repo: 'acme/widgets',
-          number: 'run-5',
-          lane: 'deep-security'
+      expect(out).toMatchObject({ skipped: '', sessionId: 'new-sid' })
+      expect(
+        factory.createSession.mock.calls[0][0].sessionSettings?.tags
+      ).toEqual([
+        {
+          name: 'factory-action',
+          metadata: {
+            repo: 'acme/widgets',
+            number: 'run-5',
+            lane: mode
+          }
         }
-      }
-    ])
-    expect(factory.postMessage.mock.calls[0][1]).toContain(
-      '/deep-security-review'
-    )
-    expect(github.listIssueComments).not.toHaveBeenCalled()
-    expect(github.createIssueComment).not.toHaveBeenCalled()
-  })
+      ])
+      expect(factory.postMessage.mock.calls[0][1]).toContain(skill)
+      expect(github.listIssueComments).not.toHaveBeenCalled()
+      expect(github.createIssueComment).not.toHaveBeenCalled()
+    }
+  )
 
   it('creates a new session when the stored one is on another computer', async () => {
     const { factory, deps } = fakes([tracking('task', 'old-sid')])
