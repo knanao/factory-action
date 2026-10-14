@@ -208,6 +208,16 @@ describe('precheck', () => {
     ).toThrow(/whole repository/)
   })
 
+  it('runs wiki only on schedule and workflow_dispatch', () => {
+    expect(precheck('wiki', parse('schedule', {}), opts)).toBeUndefined()
+    expect(
+      precheck('wiki', parse('workflow_dispatch', {}), opts)
+    ).toBeUndefined()
+    expect(() =>
+      precheck('wiki', parse('pull_request', pullRequestEvent('opened')), opts)
+    ).toThrow(/whole repository/)
+  })
+
   it('lets custom mode run on any event', () => {
     expect(precheck('custom', parse('schedule', {}), opts)).toBeUndefined()
   })

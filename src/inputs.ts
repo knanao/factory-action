@@ -6,6 +6,7 @@ export const MODES = [
   'security',
   'deep-security',
   'qa',
+  'wiki',
   'custom',
   'cleanup'
 ] as const
@@ -16,7 +17,7 @@ export type AutonomyLevel = (typeof AUTONOMY_LEVELS)[number]
 
 /** Skills and plugin commands that `@factory <name>` runs as `/<name>`. */
 export const DEFAULT_COMMANDS =
-  'security-review,deep-security-review,qa,verify,qa-test,demo'
+  'security-review,deep-security-review,qa,wiki,verify,qa-test,demo'
 
 export interface Inputs {
   factoryApiKey: string

@@ -195,10 +195,11 @@ export function precheck(
     return t.action === 'closed' ? undefined : 'no-trigger'
   }
 
-  if (mode === 'deep-security') {
+  // deep-security and wiki cover the whole repository, not one thread.
+  if (mode === 'deep-security' || mode === 'wiki') {
     if (!SCHEDULED_EVENTS.includes(t.event)) {
       throw new Error(
-        `mode 'deep-security' audits the whole repository and supports only ${SCHEDULED_EVENTS.join(', ')}, got '${t.event}'`
+        `mode '${mode}' works on the whole repository and supports only ${SCHEDULED_EVENTS.join(', ')}, got '${t.event}'`
       )
     }
     return undefined
