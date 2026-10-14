@@ -4,6 +4,7 @@ Delegate work from GitHub to [Factory](https://factory.ai) Droid through the [Se
 
 - **Task delegation.** Comment `@factory <anything>` on an issue or PR and Droid does it: implement, fix, explain, run skills and commands such as `security-review` or `verify`, and so on. Follow-up comments continue **the same session**.
 - **CI jobs.** Automatic code review, diff security review (`security-review` skill) and opt-in QA (`qa` skill) on every PR push. After a push, the same session reviews only the new commits.
+- **Isolated Environment mode.** Use a Factory Environment to provision one unlisted computer per issue/PR and lane. The action reuses it for follow-ups and deletes it when the thread closes.
 - **Fire-and-forget.** The action creates or reuses a session, sends one message and exits within seconds. Droid runs on your Droid Computer and writes results (PRs, comments, reviews) to GitHub itself.
 - **Quiet for outsiders.** Authorization uses `author_association`, so mentions from outside users don't start the job.
 
@@ -28,12 +29,12 @@ GitHub event ─▶ workflow job (if: author_association filter)
                   ▼
            factory-action (node24, seconds)
              1. normalize the event, check the trigger, authorize
-             2. read the lane's session from its tracking comment
-             3. follow up on that session, or create a new one
+             2. read the lane's session and computer from its tracking comment
+             3. reuse them, or create an Environment computer and session
              4. POST the message, update the tracking comment, exit
                   │
                   ▼
-           Droid Computer (computer-id)
+           Droid Computer (computer-id or Environment-created)
              runs the task / review / security review with skills,
              writes back to GitHub with gh and git
 ```
@@ -44,7 +45,7 @@ Sessions are keyed by **(repository, issue/PR number, lane)**. The lane defaults
 
 1. **The Sessions API is enabled for your Factory organization.** The docs say it is "enabled for selected organizations only", so confirm this before adopting the action.
 2. **A Factory API key.** Prefer a [service account](https://docs.factory.com/enterprise/identity-and-access) key, so sessions and billing belong to the service account. Store it as the secret `FACTORY_API_KEY`.
-3. **A Droid Computer** with the repository cloned. Store its ID as the variable `FACTORY_COMPUTER_ID`. See [Computer setup](#computer-setup).
+3. **A Droid Computer or Factory Environment** with the repository cloned. Store the computer ID as `FACTORY_COMPUTER_ID`, or the Environment ID as `FACTORY_ENVIRONMENT_ID`. See [Computer setup](#computer-setup) and [Environment setup](#environment-setup).
 
 ## Quick start
 
@@ -102,6 +103,35 @@ jobs:
 
 More examples are in [examples/](./examples): opt-in QA and a weekly full-repository security audit.
 
+### Use a Factory Environment
+
+To isolate each issue/PR lane, replace `computer-id` with:
+
+```yaml
+environment-id: ${{ vars.FACTORY_ENVIRONMENT_ID }}
+```
+
+Use the same `environment-id` in every workflow, including cleanup. For example:
+
+```yaml
+on:
+  issues: { types: [closed] }
+  pull_request_target: { types: [closed] }
+permissions: {}
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions: { issues: write, pull-requests: write }
+    steps:
+      - uses: knanao/factory-action@v0.2.0
+        with:
+          factory-api-key: ${{ secrets.FACTORY_API_KEY }}
+          environment-id: ${{ vars.FACTORY_ENVIRONMENT_ID }}
+          mode: cleanup
+```
+
+See [`examples/factory-environment-cleanup.yml`](examples/factory-environment-cleanup.yml) for the full workflow. Issue/PR computers are removed on close. Cleanup does not find computers for runs without an issue/PR, such as scheduled `deep-security` audits and `workflow_dispatch`; those computers remain until manually deleted in Factory. See [Environment setup](#environment-setup) for snapshot and build-script guidance.
+
 ## Usage
 
 ### Mentions (`mode: mention`, default)
@@ -129,7 +159,7 @@ Any text after `@factory` goes to Droid unchanged. To run a skill or plugin comm
 | `security` | `pull_request` | `/security-review` on the diff. Inline `[P0]`–`[P2] [security]` findings; P3 findings go only in the summary |
 | `deep-security` | `schedule`, `workflow_dispatch` | `/deep-security-review` on the whole repository at the default branch. Findings go only to **draft security advisories** (see below) |
 | `qa` | `pull_request` | `/qa` on the changed flows, posted as a pass/fail/blocked report. Opt-in, see [QA](#qa-and-droid-control) |
-| `cleanup` | `issues` / `pull_request_target` (`closed`) | Asks every session tracked on the closed thread to remove its worktree and local branch. Nothing is posted to GitHub. See [Computer setup](#computer-setup) |
+| `cleanup` | `issues` / `pull_request_target` (`closed`) | With `computer-id`, asks tracked sessions to remove their worktrees and local branches. With `environment-id`, deletes the thread's Environment computers directly. See [Computer setup](#computer-setup) |
 | `custom` | any (e.g. `schedule`) | Sends the `prompt` input with the repository/thread context |
 
 - Drafts are skipped.
@@ -164,7 +194,9 @@ This is enforced through the session's system prompt. It needs the Droid Control
 | Input | Default | Description |
 | --- | --- | --- |
 | `factory-api-key` | **required** | Factory API key (service account recommended) |
-| `computer-id` | **required** | Droid Computer to run the session on |
+| `computer-id` | — | Existing Droid Computer to run the session on. Set exactly one of this or `environment-id` |
+| `environment-id` | — | Factory Environment used to create one unlisted computer per issue/PR and lane. Set exactly one of this or `computer-id` |
+| `provision-timeout-sec` | `300` | Maximum time to wait for an Environment computer to become active |
 | `mode` | `mention` | `mention` \| `review` \| `security` \| `deep-security` \| `qa` \| `custom` \| `cleanup` |
 | `prompt` | `''` | Template for `custom` (required there); extra instructions for the other modes |
 | `lane` | mode (`task` for mention) | Session reuse key per issue/PR |
@@ -189,6 +221,7 @@ This is enforced through the session's system prompt. It needs the Droid Control
 | --- | --- |
 | `session-id` | Session the message was sent to (in `cleanup` mode, the sessions asked to clean up, comma separated) |
 | `session-url` | Link to the session in the Factory app |
+| `computer-id` | Computer used by the session; in Environment cleanup mode, computers deleted (comma separated) |
 | `reused` | `true` if the message was a follow-up |
 | `skipped` | `''`, or `unauthorized` \| `no-trigger` \| `fork` \| `bot` \| `draft` |
 
@@ -210,6 +243,16 @@ This is enforced through the session's system prompt. It needs the Droid Control
    # plus the runtime tools you need: agent-browser (Chromium), tuistory, ffmpeg
    ```
    The app under test must be startable on the computer or reachable, e.g. a staging URL.
+
+### Environment setup
+
+Use an organization Environment, especially when the workflow uses a service-account API key. Clone the target repository and install its dependencies in the Environment setup steps. Install Droid Control and its runtime tools there if the workflow uses UI evidence, `verify`, `qa-test` or `qa`.
+
+Build scripts should leave tracked files unchanged. For example, use the repository's lockfile-based install (`npm ci`, `bun install --frozen-lockfile`, or the equivalent), not commands that rewrite `package.json` or the lockfile. Environment build steps do not receive Runtime secrets. The Environment is a snapshot: computers created from it keep their own state, and rebuilding the Environment does not update existing computers. New issues/PRs use the newer snapshot.
+
+The action creates one persistent, unlisted computer per issue/PR and lane. Follow-ups reuse that computer; closing the issue/PR deletes it. Runs without an issue/PR (including scheduled deep-security audits and manual dispatches) are not covered by cleanup. Delete those computers manually from Factory until an automatic sweep mode is available.
+
+The first run waits for the computer to become active, up to `provision-timeout-sec` (300 seconds by default). If a run is cancelled during provisioning, the next run finds the same computer by its deterministic name and resumes waiting instead of creating a duplicate.
 
 ## QA and Droid Control
 

@@ -14,6 +14,7 @@ mock.module('@actions/core', () => core)
 
 const { context } = await import('@actions/github')
 const delegation = await import('../src/delegate.js')
+const { getInputs } = await import('../src/inputs.js')
 const { run } = await import('../src/main.js')
 
 describe('run job summary', () => {
@@ -50,6 +51,7 @@ describe('run job summary', () => {
       skipped: '',
       sessionId: 'task-sid',
       sessionUrl: 'https://app.factory.ai/sessions/task-sid',
+      computerId: 'comp-1',
       reused: false
     })
 
@@ -59,9 +61,45 @@ describe('run job summary', () => {
     expect(core.summary.addTable.mock.calls[0][0][1]).toEqual([
       'task',
       '<a href="https://app.factory.ai/sessions/task-sid">task-sid</a>',
+      'comp-1',
       'false'
     ])
+    expect(core.setOutput).toHaveBeenCalledWith('computer-id', 'comp-1')
     expect(core.summary.write).toHaveBeenCalledTimes(1)
+  })
+
+  it('requires exactly one computer source and supports provisioning timeout', () => {
+    const getInput = core.getInput.getMockImplementation()!
+    core.getInput.mockImplementation((name, options) =>
+      name === 'computer-id' || name === 'environment-id'
+        ? ''
+        : getInput(name, options)
+    )
+    expect(() => getInputs()).toThrow(
+      "Set exactly one of the inputs 'computer-id' and 'environment-id'"
+    )
+
+    core.getInput.mockImplementation((name, options) =>
+      name === 'computer-id'
+        ? 'comp-1'
+        : name === 'environment-id'
+          ? 'env-1'
+          : getInput(name, options)
+    )
+    expect(() => getInputs()).toThrow(
+      "Set exactly one of the inputs 'computer-id' and 'environment-id'"
+    )
+
+    core.getInput.mockImplementation((name, options) => {
+      if (name === 'computer-id') return ''
+      if (name === 'environment-id') return 'env-1'
+      if (name === 'provision-timeout-sec') return '90'
+      return getInput(name, options)
+    })
+    expect(getInputs()).toMatchObject({
+      environmentId: 'env-1',
+      provisionTimeoutMs: 90_000
+    })
   })
 
   for (const sessionId of ['task-sid', 'task-sid,review-sid']) {
@@ -78,6 +116,7 @@ describe('run job summary', () => {
       expect(core.summary.addTable.mock.calls[0][0][1]).toEqual([
         'cleanup',
         sessionId,
+        '',
         'true'
       ])
       expect(core.summary.write).toHaveBeenCalledTimes(1)
@@ -86,6 +125,30 @@ describe('run job summary', () => {
       expect(core.setOutput).toHaveBeenCalledWith('reused', 'true')
     })
   }
+
+  it('summarizes Environment computers deleted during cleanup', async () => {
+    const getInput = core.getInput.getMockImplementation()!
+    core.getInput.mockImplementation((name, options) =>
+      name === 'mode' ? 'cleanup' : getInput(name, options)
+    )
+    delegate.mockResolvedValue({
+      skipped: '',
+      computerId: 'comp-1,comp-2',
+      reused: true
+    })
+
+    await run()
+
+    expect(core.setFailed).not.toHaveBeenCalled()
+    expect(core.setOutput).toHaveBeenCalledWith('computer-id', 'comp-1,comp-2')
+    expect(core.summary.addTable.mock.calls[0][0][1]).toEqual([
+      'cleanup',
+      '',
+      'comp-1,comp-2',
+      'true'
+    ])
+    expect(core.summary.write).toHaveBeenCalledTimes(1)
+  })
 
   for (const outcome of [
     { skipped: '' as const, sessionId: '', reused: true },

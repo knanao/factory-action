@@ -12,7 +12,7 @@ export function diffSteps(ctx: PromptContext): string {
     : ''
   return join(
     followUp,
-    `In your worktree, check out the PR without taking its branch with \`gh pr checkout ${pr.number} --detach\` and run \`git fetch origin ${pr.baseRef}\`. The diff to examine is \`git diff ${range}\`.`
+    `In your workspace, check out the PR without taking its branch with \`gh pr checkout ${pr.number} --detach\` and run \`git fetch origin ${pr.baseRef}\`. The diff to examine is \`git diff ${range}\`.`
   )
 }
 

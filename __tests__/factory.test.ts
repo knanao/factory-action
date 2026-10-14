@@ -71,6 +71,68 @@ describe('FactoryClient', () => {
     await expect(client(fetchMock).getSession('gone')).resolves.toBeUndefined()
   })
 
+  it('looks up computers by name and handles missing computers', async () => {
+    const fetchMock = jest
+      .fn<Fetch>()
+      .mockResolvedValueOnce(
+        json(404, { status: 404, title: 'Not Found', detail: 'missing' })
+      )
+      .mockResolvedValueOnce(
+        json(404, { status: 404, title: 'Not Found', detail: 'missing' })
+      )
+    const factory = client(fetchMock)
+    await expect(
+      factory.getComputerByName('fa-widgets-42')
+    ).resolves.toBeUndefined()
+    await expect(factory.findComputer('gone')).resolves.toBeUndefined()
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      'https://api.test/api/v0/computers/name/fa-widgets-42',
+      'https://api.test/api/v0/computers/gone'
+    ])
+  })
+
+  it('creates, lists unlisted and deletes computers', async () => {
+    const computer = {
+      id: 'c1',
+      name: 'fa-widgets-42-task',
+      status: 'active',
+      computerSource: { kind: 'template', templateId: 'env-1' }
+    }
+    const fetchMock = jest
+      .fn<Fetch>()
+      .mockResolvedValueOnce(json(201, computer))
+      .mockResolvedValueOnce(json(200, { computers: [computer] }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    const factory = client(fetchMock)
+
+    await expect(
+      factory.createComputer({
+        name: computer.name,
+        source: {
+          kind: 'environment',
+          environmentId: 'env-1',
+          isListed: false
+        }
+      })
+    ).resolves.toEqual(computer)
+    await expect(factory.listComputers()).resolves.toEqual([computer])
+    await expect(factory.deleteComputer('c1')).resolves.toBe(true)
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      'https://api.test/api/v0/computers',
+      'https://api.test/api/v0/computers?includeUnlisted=true',
+      'https://api.test/api/v0/computers/c1'
+    ])
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST')
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({
+      name: computer.name,
+      source: {
+        kind: 'environment',
+        environmentId: 'env-1',
+        isListed: false
+      }
+    })
+  })
+
   it('treats a message timeout as accepted', async () => {
     const fetchMock = jest
       .fn<Fetch>()

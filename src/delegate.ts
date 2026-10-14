@@ -1,9 +1,21 @@
 import * as core from '@actions/core'
 import { authorize } from './authz.js'
-import type { CreateSessionRequest, FactoryClient } from './factory.js'
+import {
+  computerName,
+  ensureComputer,
+  isFromEnvironment,
+  threadPrefix
+} from './compute.js'
+import type {
+  Computer,
+  CreateSessionRequest,
+  FactoryClient,
+  Session
+} from './factory.js'
 import { resolveCwd, sessionUrl } from './factory.js'
 import type { GitHubApi } from './github.js'
 import type { Inputs } from './inputs.js'
+import type { Workspace } from './prompts/common.js'
 import { buildPrompt, cleanupPrompt, systemRules } from './prompts/index.js'
 import type { LaneState, TrackingComment } from './state.js'
 import { findAllTracking, findTracking, renderTracking } from './state.js'
@@ -12,7 +24,16 @@ import { findCommand, needsAuthorization, precheck } from './trigger.js'
 
 export type FactoryApi = Pick<
   FactoryClient,
-  'createSession' | 'getSession' | 'interrupt' | 'postMessage' | 'getComputer'
+  | 'createSession'
+  | 'getSession'
+  | 'interrupt'
+  | 'postMessage'
+  | 'getComputer'
+  | 'findComputer'
+  | 'getComputerByName'
+  | 'createComputer'
+  | 'listComputers'
+  | 'deleteComputer'
 >
 
 export interface Deps {
@@ -27,6 +48,8 @@ export interface Outcome {
   sessionId?: string
   sessionUrl?: string
   reused?: boolean
+  /** The session's computer; in cleanup mode, the computers deleted. */
+  computerId?: string
 }
 
 /**
@@ -83,42 +106,102 @@ export async function delegate(
     tracking = findTracking(comments, inputs.lane, self)
   }
 
+  const key = t.number !== undefined ? String(t.number) : `run-${deps.runId}`
+  const environmentComputer = inputs.environmentId
+    ? await ensureComputer(factory, {
+        name: computerName(t.owner, t.repo, key, inputs.lane),
+        environmentId: inputs.environmentId,
+        timeoutMs: inputs.provisionTimeoutMs
+      })
+    : undefined
+  const computerId = environmentComputer?.id ?? inputs.computerId
+  const cwd = inputs.cwd
+    ? inputs.cwd
+    : environmentComputer
+      ? resolveComputerCwd(environmentComputer, computerId, t.repo)
+      : undefined
+  const branch = `factory/${inputs.lane}-${key}`
+
   let sessionId: string | undefined
   let previousSha: string | undefined
-  if (tracking && inputs.reuseSession) {
-    const existing = await factory.getSession(tracking.state.sid)
-    if (existing?.computerId && existing.computerId !== inputs.computerId) {
-      core.info(
-        `Session ${existing.sessionId} runs on computer ${existing.computerId}, not ${inputs.computerId}; creating a new one`
-      )
-    } else if (existing) {
-      sessionId = existing.sessionId
-      if (isPush && existing.status !== 'idle') {
+  let existing: Session | undefined
+  if (tracking && (inputs.reuseSession || environmentComputer)) {
+    existing = await factory.getSession(tracking.state.sid)
+    if (inputs.reuseSession && environmentComputer) {
+      const trackedComputer = tracking.state.cid
+        ? await factory.findComputer(tracking.state.cid)
+        : undefined
+      const canReuse =
+        existing?.computerId === tracking.state.cid &&
+        existing?.computerId === computerId &&
+        trackedComputer?.status === 'active' &&
+        isFromEnvironment(trackedComputer, inputs.environmentId)
+      if (canReuse && existing) {
+        sessionId = existing.sessionId
+      } else {
         core.info(
-          `Interrupting running session ${sessionId}: a new push supersedes it`
+          `Tracked Environment session ${tracking.state.sid} is no longer on its active computer; creating a new one`
         )
-        await factory.interrupt(sessionId)
       }
-      // The tracked SHA was sent, not necessarily reviewed before interruption.
-      if (
-        isPush &&
-        existing.status === 'idle' &&
-        tracking.state.sha !== t.pr?.headSha
+    } else if (
+      inputs.reuseSession &&
+      existing?.computerId &&
+      existing.computerId !== computerId
+    ) {
+      core.info(
+        `Session ${existing.sessionId} runs on computer ${existing.computerId}, not ${computerId}; creating a new one`
       )
-        previousSha = tracking.state.sha
-    } else {
+    } else if (inputs.reuseSession && existing) {
+      sessionId = existing.sessionId
+    } else if (!existing) {
       core.info(
         `Session ${tracking.state.sid} no longer exists; creating a new one`
       )
     }
   }
 
+  if (
+    environmentComputer &&
+    !inputs.reuseSession &&
+    existing &&
+    existing.computerId === computerId &&
+    existing.status !== 'idle'
+  ) {
+    core.info(
+      `Interrupting previous session ${existing.sessionId}: reuse-session is disabled`
+    )
+    await factory.interrupt(existing.sessionId)
+  }
+
+  if (sessionId && existing) {
+    if (isPush && existing.status !== 'idle') {
+      core.info(
+        `Interrupting running session ${sessionId}: a new push supersedes it`
+      )
+      await factory.interrupt(sessionId)
+    }
+    // The tracked SHA was sent, not necessarily reviewed before interruption.
+    if (
+      isPush &&
+      existing.status === 'idle' &&
+      tracking?.state.sha !== t.pr?.headSha
+    )
+      previousSha = tracking?.state.sha
+  }
+
   const reused = sessionId !== undefined
   if (!sessionId) {
-    const cwd =
-      inputs.cwd || (await resolveRepoDir(factory, inputs.computerId, t.repo))
+    const sessionCwd =
+      cwd ?? (await resolveRepoDir(factory, computerId, t.repo))
+    const workspace: Workspace = environmentComputer
+      ? { kind: 'clone', branch }
+      : {
+          kind: 'worktree',
+          path: `${sessionCwd.replace(/\/+$/, '')}.worktrees/${inputs.lane}-${key}`,
+          branch
+        }
     const session = await factory.createSession(
-      sessionRequest(inputs, t, cwd, deps.runId)
+      sessionRequest(inputs, t, sessionCwd, deps.runId, computerId, workspace)
     )
     sessionId = session.sessionId
     core.info(`Created session ${sessionId}`)
@@ -163,6 +246,7 @@ export async function delegate(
   const url = sessionUrl(sessionId)
   if (t.number !== undefined) {
     const state: LaneState = { v: 1, lane: inputs.lane, sid: sessionId }
+    if (environmentComputer) state.cid = environmentComputer.id
     if (isPush && t.pr) state.sha = t.pr.headSha
     const body = renderTracking(state, {
       sessionUrl: url,
@@ -178,14 +262,10 @@ export async function delegate(
     }
   }
 
-  return { skipped: '', sessionId, sessionUrl: url, reused }
+  return { skipped: '', sessionId, sessionUrl: url, reused, computerId }
 }
 
-/**
- * Asks every session tracked on a closed issue or PR to remove its worktree,
- * so worktrees and local branches do not pile up on the computer. A session
- * that is reopened later recreates its worktree (common rule 6).
- */
+/** Performs mode-specific cleanup for a closed issue or PR. */
 async function cleanup(
   inputs: Inputs,
   t: Trigger,
@@ -193,6 +273,7 @@ async function cleanup(
 ): Promise<Outcome> {
   const { github, factory } = deps
   if (t.number === undefined) return { skipped: 'no-trigger' }
+  if (inputs.environmentId) return cleanupEnvironment(inputs, t, deps)
   const [comments, self] = await Promise.all([
     github.listIssueComments(t.number),
     github.selfLogin()
@@ -222,12 +303,109 @@ async function cleanup(
   return { skipped: '', sessionId: sessions.join(','), reused: true }
 }
 
+async function cleanupEnvironment(
+  inputs: Inputs,
+  t: Trigger,
+  deps: Deps
+): Promise<Outcome> {
+  const { github, factory } = deps
+  if (t.number === undefined) return { skipped: 'no-trigger' }
+  const [comments, self, computers] = await Promise.all([
+    github.listIssueComments(t.number),
+    github.selfLogin(),
+    factory.listComputers()
+  ])
+  const trackings = findAllTracking(comments, self)
+  const prefix = threadPrefix(t.owner, t.repo, t.number)
+  const targets = new Map(
+    computers
+      .filter(
+        (computer) =>
+          computer.name.startsWith(prefix) &&
+          isFromEnvironment(computer, inputs.environmentId)
+      )
+      .map((computer) => [computer.id, computer])
+  )
+  const unmanaged = new Set<string>()
+  const alreadyAbsent = new Set<string>()
+  for (const { state } of trackings) {
+    if (!state.cid || targets.has(state.cid)) continue
+    const computer = await factory.findComputer(state.cid)
+    if (
+      computer?.name.startsWith(prefix) &&
+      isFromEnvironment(computer, inputs.environmentId)
+    ) {
+      targets.set(computer.id, computer)
+    } else if (!computer) {
+      alreadyAbsent.add(state.cid)
+    } else {
+      unmanaged.add(state.cid)
+    }
+  }
+
+  const deleted = new Set<string>()
+  const deletionFailures: string[] = []
+  for (const computerId of targets.keys()) {
+    try {
+      if (await factory.deleteComputer(computerId)) deleted.add(computerId)
+      else alreadyAbsent.add(computerId)
+    } catch (err) {
+      deletionFailures.push(computerId)
+      core.warning(`Could not delete computer ${computerId}: ${err}`)
+    }
+  }
+
+  for (const tracking of trackings) {
+    const cid = tracking.state.cid
+    if (!cid) continue
+    const status =
+      cid && deletionFailures.includes(cid)
+        ? 'Closed (computer deletion failed)'
+        : unmanaged.has(cid)
+          ? 'Closed (computer not managed)'
+          : alreadyAbsent.has(cid) || (!deleted.has(cid) && !targets.has(cid))
+            ? 'Closed (computer already absent)'
+            : 'Closed (computer deleted)'
+    const body = renderTracking(tracking.state, {
+      sessionUrl: sessionUrl(tracking.state.sid),
+      reused: true,
+      runUrl: deps.runUrl,
+      status
+    })
+    await github
+      .updateIssueComment(tracking.id, body)
+      .catch((err) =>
+        core.warning(`Could not update the tracking comment: ${err}`)
+      )
+  }
+
+  if (targets.size === 0) core.info('No Environment computers to delete')
+  if (deletionFailures.length > 0) {
+    throw new Error(
+      `Could not delete Environment computers: ${deletionFailures.join(', ')}`
+    )
+  }
+  return {
+    skipped: '',
+    computerId: [...deleted].join(','),
+    reused: true
+  }
+}
+
 async function resolveRepoDir(
   factory: FactoryApi,
   computerId: string,
   repo: string
 ): Promise<string> {
   const computer = await factory.getComputer(computerId)
+  return resolveComputerCwd(computer, computerId, repo)
+}
+
+function resolveComputerCwd(
+  computer: Computer,
+  computerId: string,
+  repo: string
+): string {
   const dir = resolveCwd(computer, repo)
   if (!dir) {
     throw new Error(
@@ -241,12 +419,14 @@ function sessionRequest(
   inputs: Inputs,
   t: Trigger,
   cwd: string,
-  runId: number
+  runId: number,
+  computerId: string,
+  workspace: Workspace
 ): CreateSessionRequest {
   const repo = `${t.owner}/${t.repo}`
   const key = t.number !== undefined ? String(t.number) : `run-${runId}`
   return {
-    computerId: inputs.computerId,
+    computerId,
     cwd,
     sessionSettings: {
       ...(inputs.model ? { model: inputs.model } : {}),
@@ -261,15 +441,10 @@ function sessionRequest(
           metadata: { repo, number: key, lane: inputs.lane }
         }
       ],
-      // The API ignores sessionSettings.worktree, so Droid creates its own
-      // worktree as told in the rules.
       systemPrompt: {
         type: 'preset',
         preset: 'droid',
-        append: systemRules(repo, inputs.triggerPhrase, {
-          path: `${cwd.replace(/\/+$/, '')}.worktrees/${inputs.lane}-${key}`,
-          branch: `factory/${inputs.lane}-${key}`
-        })
+        append: systemRules(repo, inputs.triggerPhrase, workspace)
       }
     }
   }

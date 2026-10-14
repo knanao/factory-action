@@ -1,0 +1,20 @@
+# Deletes Environment-created computers when their issue or PR closes.
+# Runs without an issue/PR (for example scheduled audits) need manual cleanup.
+name: Factory Environment Cleanup
+
+on:
+  issues: { types: [closed] }
+  pull_request_target: { types: [closed] }
+
+permissions: {}
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions: { issues: write, pull-requests: write }
+    steps:
+      - uses: knanao/factory-action@v0.2.0
+        with:
+          factory-api-key: ${{ secrets.FACTORY_API_KEY }}
+          environment-id: ${{ vars.FACTORY_ENVIRONMENT_ID }}
+          mode: cleanup
