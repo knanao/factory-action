@@ -64,6 +64,12 @@ jobs:
             exit 1
           fi
 
+      # Fails when dist/index.js outgrows its budget; the report lists the
+      # heaviest packages and goes to the job summary.
+      - name: Check Bundle Size
+        id: bundle-size
+        run: bun run check:bundle
+
       # If `dist/` was different than expected, upload the expected version as a
       # workflow artifact.
       - if: ${{ failure() && steps.diff.outcome == 'failure' }}

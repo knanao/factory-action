@@ -1,0 +1,15 @@
+{
+  "path": ["src", "__tests__", "__fixtures__", "script", ".githooks"],
+  "format": ["typescript", "javascript", "bash"],
+  "ignore": [
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/coverage/**",
+    "**/bun.lock"
+  ],
+  "minTokens": 50,
+  "minLines": 5,
+  "threshold": 1.5,
+  "reporters": ["console"],
+  "noColors": true
+}

@@ -10,9 +10,42 @@ the package manager, test runner and bundler. The action itself runs on GitHub's
 `node24` runtime.
 
 ```sh
-bun install
-bun run all   # format, lint, typecheck, test, bundle dist/
+bun install    # also enables the pre-commit hook
+bun run all    # format, lint, typecheck, static checks, test, bundle dist/
+bun run check  # every check, without rewriting files or running tests
 ```
+
+### Checks
+
+| Command                | What it enforces                                                                                                                 |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `bun run lint`         | ESLint, including naming conventions, `complexity` ≤ 15, `max-depth` ≤ 4, `max-params` ≤ 4 and `max-lines` ≤ 400 (700 for tests) |
+| `bun run knip`         | No unused files, exports or dependencies, and no unlisted ones (`knip.jsonc`)                                                    |
+| `bun run depcruise`    | Module boundaries and no circular imports (`.dependency-cruiser.cjs`, rules listed in `AGENTS.md`)                               |
+| `bun run jscpd`        | No duplicated code in `src/`, under 1.5% duplication overall (`.jscpd.json`)                                                     |
+| `bun run check:size`   | Tracked files stay under 100 KiB (`bun.lock`: 256 KiB)                                                                           |
+| `bun run check:todos`  | TODO, FIXME, HACK and XXX markers link to an issue, as in `TODO(#123): ...`                                                      |
+| `bun run check:bundle` | `dist/index.js` stays under 1,100,000 bytes; lists the heaviest packages (run `bun run package` first)                           |
+
+`bun run check:static` runs knip, dependency-cruiser, jscpd and the size and
+marker checks together. `knip`, `dependency-cruiser` and `jscpd` are the only
+devDependencies added for these checks: ESLint and TypeScript cannot find unused
+files and dependencies, enforce import boundaries across modules, or detect
+copy-paste.
+
+Names follow the codebase: `camelCase` for variables, functions and properties,
+`PascalCase` for types and classes, `UPPER_CASE` for module-level constants.
+Properties that mirror webhook payloads, environment variables or HTTP headers
+keep their external spelling. `AGENTS.md` (Conventions) has the details.
+
+### Pre-commit hook
+
+`bun install` runs the `prepare` script (`script/install-hooks.sh`), which
+points `core.hooksPath` at `.githooks/` (skipped when `CI` is set). Before each
+commit, `.githooks/pre-commit` runs Prettier and ESLint on the staged files, the
+typecheck and `bun run check:static` (about five seconds). Run it by hand with
+`.githooks/pre-commit`. Bypass it with `git commit --no-verify` only in an
+emergency: CI runs the same checks, and automated agents must never bypass it.
 
 ### Dev container
 
@@ -70,8 +103,8 @@ The full scenario list and what to check is in
 2. Make your change and run `bun run all` until it is green.
 3. Open a pull request against `main` with a short description of the change and
    its motivation.
-4. CI (format, lint, typecheck, tests, dist check, CodeQL) must pass before
-   review.
+4. CI (format, lint, typecheck, static checks, tests, dist check with the bundle
+   budget, CodeQL) must pass before review.
 
 ## License
 

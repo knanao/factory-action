@@ -1,11 +1,7 @@
 import * as core from '@actions/core'
 import { authorize } from './authz.js'
-import {
-  computerName,
-  ensureComputer,
-  isFromEnvironment,
-  threadPrefix
-} from './compute.js'
+import { cleanup } from './cleanup.js'
+import { computerName, ensureComputer, isFromEnvironment } from './compute.js'
 import type {
   Computer,
   CreateSessionRequest,
@@ -16,9 +12,10 @@ import { resolveCwd, sessionUrl } from './factory.js'
 import type { GitHubApi } from './github.js'
 import type { Inputs } from './inputs.js'
 import type { Workspace } from './prompts/common.js'
-import { buildPrompt, cleanupPrompt, systemRules } from './prompts/index.js'
+import type { PromptContext } from './prompts/index.js'
+import { buildPrompt, systemRules } from './prompts/index.js'
 import type { LaneState, TrackingComment } from './state.js'
-import { findAllTracking, findTracking, renderTracking } from './state.js'
+import { findTracking, renderTracking } from './state.js'
 import type { SkipReason, Trigger } from './trigger.js'
 import { findCommand, needsAuthorization, precheck } from './trigger.js'
 
@@ -52,6 +49,25 @@ export interface Outcome {
   computerId?: string
 }
 
+/** Where a lane's session runs, resolved before any session is touched. */
+interface Lane {
+  /** A new push supersedes the previous run in this lane. */
+  isPush: boolean
+  key: string
+  branch: string
+  tracking?: TrackingComment
+  environmentComputer?: Computer
+  computerId: string
+  cwd?: string
+  headSha?: string
+}
+
+/** The tracked session, and its id when it may be reused. */
+interface Previous {
+  existing?: Session
+  sessionId?: string
+}
+
 /**
  * Hands the event to a Droid session and returns right away (fire-and-forget).
  * Droid writes its results to GitHub itself.
@@ -70,22 +86,15 @@ export async function delegate(
   }
 
   // Cleanup acts on a closed thread and sends no user-written text to Droid.
-  if (inputs.mode === 'cleanup') return cleanup(inputs, t, deps)
+  if (inputs.mode === 'cleanup') {
+    const { number } = t
+    if (number === undefined) return { skipped: 'no-trigger' }
+    const cleaned = await cleanup(inputs, { ...t, number }, deps)
+    return { skipped: '', ...cleaned, reused: true }
+  }
 
-  if (needsAuthorization(t)) {
-    const authz = await authorize(t.author!, {
-      allowedAssociations: inputs.allowedAssociations,
-      permissionFallback: inputs.permissionFallback,
-      getPermission: (login) => github.getPermission(login)
-    })
-    if (!authz.allowed) {
-      // Stay quiet on the thread to avoid noise for outside users.
-      core.notice(
-        `@${t.author!.login} is not allowed to trigger Droid (${authz.reason})`
-      )
-      return { skipped: 'unauthorized' }
-    }
-    core.info(`Authorized @${t.author!.login} (${authz.reason})`)
+  if (!(await isAuthorized(inputs, t, github))) {
+    return { skipped: 'unauthorized' }
   }
 
   if (t.reaction) {
@@ -94,21 +103,94 @@ export async function delegate(
       .catch((err) => core.warning(`Could not add reaction: ${err}`))
   }
 
-  // A new push supersedes the previous run in this lane.
-  const isPush = t.event === 'pull_request' || t.event === 'pull_request_target'
+  const lane = await resolveLane(inputs, t, deps)
+  const previous = await findPrevious(inputs, factory, lane)
+  await interruptUnreused(inputs, factory, lane, previous)
+  const previousSha = await supersede(factory, lane, previous)
 
+  const reused = previous.sessionId !== undefined
+  let sessionId = previous.sessionId
+  if (!sessionId) {
+    sessionId = await openSession(inputs, t, factory, lane)
+  } else {
+    core.info(`Reusing session ${sessionId}`)
+  }
+
+  const sent = await factory.postMessage(
+    sessionId,
+    buildPrompt(inputs.mode, promptContext(inputs, t, previousSha)),
+    inputs.messageTimeoutMs
+  )
+  if (sent.timedOut) {
+    core.warning(
+      `No response from the messages endpoint within ${inputs.messageTimeoutMs} ms; assuming the message was accepted`
+    )
+  }
+
+  const url = sessionUrl(sessionId)
+  if (t.number !== undefined) {
+    const body = renderTracking(laneState(inputs, t, lane, sessionId), {
+      sessionUrl: url,
+      reused,
+      runUrl: deps.runUrl
+    })
+    try {
+      if (lane.tracking) await github.updateIssueComment(lane.tracking.id, body)
+      else await github.createIssueComment(t.number, body)
+    } catch (err) {
+      // Droid is already working; a missing tracking comment only loses reuse.
+      core.warning(`Could not write the tracking comment: ${err}`)
+    }
+  }
+
+  return {
+    skipped: '',
+    sessionId,
+    sessionUrl: url,
+    reused,
+    computerId: lane.computerId
+  }
+}
+
+async function isAuthorized(
+  inputs: Inputs,
+  t: Trigger,
+  github: GitHubApi
+): Promise<boolean> {
+  if (!needsAuthorization(t)) return true
+  const authz = await authorize(t.author!, {
+    allowedAssociations: inputs.allowedAssociations,
+    permissionFallback: inputs.permissionFallback,
+    getPermission: (login) => github.getPermission(login)
+  })
+  if (!authz.allowed) {
+    // Stay quiet on the thread to avoid noise for outside users.
+    core.notice(
+      `@${t.author!.login} is not allowed to trigger Droid (${authz.reason})`
+    )
+    return false
+  }
+  core.info(`Authorized @${t.author!.login} (${authz.reason})`)
+  return true
+}
+
+async function resolveLane(
+  inputs: Inputs,
+  t: Trigger,
+  deps: Deps
+): Promise<Lane> {
   let tracking: TrackingComment | undefined
   if (t.number !== undefined) {
     const [comments, self] = await Promise.all([
-      github.listIssueComments(t.number),
-      github.selfLogin()
+      deps.github.listIssueComments(t.number),
+      deps.github.selfLogin()
     ])
     tracking = findTracking(comments, inputs.lane, self)
   }
 
-  const key = t.number !== undefined ? String(t.number) : `run-${deps.runId}`
+  const key = laneKey(t, deps.runId)
   const environmentComputer = inputs.environmentId
-    ? await ensureComputer(factory, {
+    ? await ensureComputer(deps.factory, {
         name: computerName(t.owner, t.repo, key, inputs.lane),
         environmentId: inputs.environmentId,
         timeoutMs: inputs.provisionTimeoutMs
@@ -120,51 +202,92 @@ export async function delegate(
     : environmentComputer
       ? resolveComputerCwd(environmentComputer, computerId, t.repo)
       : undefined
-  const branch = `factory/${inputs.lane}-${key}`
-
-  let sessionId: string | undefined
-  let previousSha: string | undefined
-  let existing: Session | undefined
-  if (tracking && (inputs.reuseSession || environmentComputer)) {
-    existing = await factory.getSession(tracking.state.sid)
-    if (inputs.reuseSession && environmentComputer) {
-      const trackedComputer = tracking.state.cid
-        ? await factory.findComputer(tracking.state.cid)
-        : undefined
-      const canReuse =
-        existing?.computerId === tracking.state.cid &&
-        existing?.computerId === computerId &&
-        trackedComputer?.status === 'active' &&
-        isFromEnvironment(trackedComputer, inputs.environmentId)
-      if (canReuse && existing) {
-        sessionId = existing.sessionId
-      } else {
-        core.info(
-          `Tracked Environment session ${tracking.state.sid} is no longer on its active computer; creating a new one`
-        )
-      }
-    } else if (
-      inputs.reuseSession &&
-      existing?.computerId &&
-      existing.computerId !== computerId
-    ) {
-      core.info(
-        `Session ${existing.sessionId} runs on computer ${existing.computerId}, not ${computerId}; creating a new one`
-      )
-    } else if (inputs.reuseSession && existing) {
-      sessionId = existing.sessionId
-    } else if (!existing) {
-      core.info(
-        `Session ${tracking.state.sid} no longer exists; creating a new one`
-      )
-    }
+  return {
+    isPush: t.event === 'pull_request' || t.event === 'pull_request_target',
+    key,
+    branch: `factory/${inputs.lane}-${key}`,
+    tracking,
+    environmentComputer,
+    computerId,
+    cwd,
+    headSha: t.pr?.headSha
   }
+}
 
+function laneKey(t: Trigger, runId: number): string {
+  return t.number !== undefined ? String(t.number) : `run-${runId}`
+}
+
+/** Looks up the tracked session and decides whether it can be reused. */
+async function findPrevious(
+  inputs: Inputs,
+  factory: FactoryApi,
+  lane: Lane
+): Promise<Previous> {
+  const { tracking, environmentComputer, computerId } = lane
+  if (!tracking || !(inputs.reuseSession || environmentComputer)) return {}
+  const existing = await factory.getSession(tracking.state.sid)
+  if (inputs.reuseSession && environmentComputer) {
+    return reuseOnEnvironment(inputs, factory, tracking.state, {
+      existing,
+      computerId
+    })
+  }
   if (
-    environmentComputer &&
+    inputs.reuseSession &&
+    existing?.computerId &&
+    existing.computerId !== computerId
+  ) {
+    core.info(
+      `Session ${existing.sessionId} runs on computer ${existing.computerId}, not ${computerId}; creating a new one`
+    )
+    return { existing }
+  }
+  if (inputs.reuseSession && existing) {
+    return { existing, sessionId: existing.sessionId }
+  }
+  if (!existing) {
+    core.info(
+      `Session ${tracking.state.sid} no longer exists; creating a new one`
+    )
+  }
+  return { existing }
+}
+
+/** Reuses an Environment session only while it runs on its tracked, active computer. */
+async function reuseOnEnvironment(
+  inputs: Inputs,
+  factory: FactoryApi,
+  state: LaneState,
+  { existing, computerId }: { existing?: Session; computerId: string }
+): Promise<Previous> {
+  const trackedComputer = state.cid
+    ? await factory.findComputer(state.cid)
+    : undefined
+  const canReuse =
+    existing?.computerId === state.cid &&
+    existing?.computerId === computerId &&
+    trackedComputer?.status === 'active' &&
+    isFromEnvironment(trackedComputer, inputs.environmentId)
+  if (canReuse && existing) return { existing, sessionId: existing.sessionId }
+  core.info(
+    `Tracked Environment session ${state.sid} is no longer on its active computer; creating a new one`
+  )
+  return { existing }
+}
+
+/** With reuse disabled, a still-running Environment session is stopped. */
+async function interruptUnreused(
+  inputs: Inputs,
+  factory: FactoryApi,
+  lane: Lane,
+  { existing }: Previous
+): Promise<void> {
+  if (
+    lane.environmentComputer &&
     !inputs.reuseSession &&
     existing &&
-    existing.computerId === computerId &&
+    existing.computerId === lane.computerId &&
     existing.status !== 'idle'
   ) {
     core.info(
@@ -172,44 +295,51 @@ export async function delegate(
     )
     await factory.interrupt(existing.sessionId)
   }
+}
 
-  if (sessionId && existing) {
-    if (isPush && existing.status !== 'idle') {
-      core.info(
-        `Interrupting running session ${sessionId}: a new push supersedes it`
-      )
-      await factory.interrupt(sessionId)
-    }
-    // The tracked SHA was sent, not necessarily reviewed before interruption.
-    if (
-      isPush &&
-      existing.status === 'idle' &&
-      tracking?.state.sha !== t.pr?.headSha
+/**
+ * Interrupts a reused session that a new push supersedes. Returns the SHA the
+ * idle reused session last saw, so the review covers only what changed since.
+ */
+async function supersede(
+  factory: FactoryApi,
+  lane: Lane,
+  { existing, sessionId }: Previous
+): Promise<string | undefined> {
+  if (!sessionId || !existing || !lane.isPush) return undefined
+  if (existing.status !== 'idle') {
+    core.info(
+      `Interrupting running session ${sessionId}: a new push supersedes it`
     )
-      previousSha = tracking?.state.sha
+    await factory.interrupt(sessionId)
+    return undefined
   }
+  // The tracked SHA was sent, not necessarily reviewed before interruption.
+  const trackedSha = lane.tracking?.state.sha
+  return trackedSha !== lane.headSha ? trackedSha : undefined
+}
 
-  const reused = sessionId !== undefined
-  if (!sessionId) {
-    const sessionCwd =
-      cwd ?? (await resolveRepoDir(factory, computerId, t.repo))
-    const workspace: Workspace = environmentComputer
-      ? { kind: 'clone', branch }
-      : {
-          kind: 'worktree',
-          path: `${sessionCwd.replace(/\/+$/, '')}.worktrees/${inputs.lane}-${key}`,
-          branch
-        }
-    const session = await factory.createSession(
-      sessionRequest(inputs, t, sessionCwd, deps.runId, computerId, workspace)
-    )
-    sessionId = session.sessionId
-    core.info(`Created session ${sessionId}`)
-  } else {
-    core.info(`Reusing session ${sessionId}`)
-  }
+async function openSession(
+  inputs: Inputs,
+  t: Trigger,
+  factory: FactoryApi,
+  lane: Lane
+): Promise<string> {
+  const cwd =
+    lane.cwd ?? (await resolveRepoDir(factory, lane.computerId, t.repo))
+  const session = await factory.createSession(
+    sessionRequest(inputs, t, lane, cwd)
+  )
+  core.info(`Created session ${session.sessionId}`)
+  return session.sessionId
+}
 
-  const text = buildPrompt(inputs.mode, {
+function promptContext(
+  inputs: Inputs,
+  t: Trigger,
+  previousSha: string | undefined
+): PromptContext {
+  return {
     repo: `${t.owner}/${t.repo}`,
     event: t.event,
     number: t.number,
@@ -231,165 +361,19 @@ export async function delegate(
     extra: inputs.prompt,
     maxComments: inputs.maxComments,
     previousSha
-  })
-  const sent = await factory.postMessage(
-    sessionId,
-    text,
-    inputs.messageTimeoutMs
-  )
-  if (sent.timedOut) {
-    core.warning(
-      `No response from the messages endpoint within ${inputs.messageTimeoutMs} ms; assuming the message was accepted`
-    )
   }
-
-  const url = sessionUrl(sessionId)
-  if (t.number !== undefined) {
-    const state: LaneState = { v: 1, lane: inputs.lane, sid: sessionId }
-    if (environmentComputer) state.cid = environmentComputer.id
-    if (isPush && t.pr) state.sha = t.pr.headSha
-    const body = renderTracking(state, {
-      sessionUrl: url,
-      reused,
-      runUrl: deps.runUrl
-    })
-    try {
-      if (tracking) await github.updateIssueComment(tracking.id, body)
-      else await github.createIssueComment(t.number, body)
-    } catch (err) {
-      // Droid is already working; a missing tracking comment only loses reuse.
-      core.warning(`Could not write the tracking comment: ${err}`)
-    }
-  }
-
-  return { skipped: '', sessionId, sessionUrl: url, reused, computerId }
 }
 
-/** Performs mode-specific cleanup for a closed issue or PR. */
-async function cleanup(
+function laneState(
   inputs: Inputs,
   t: Trigger,
-  deps: Deps
-): Promise<Outcome> {
-  const { github, factory } = deps
-  if (t.number === undefined) return { skipped: 'no-trigger' }
-  if (inputs.environmentId) return cleanupEnvironment(inputs, t, deps)
-  const [comments, self] = await Promise.all([
-    github.listIssueComments(t.number),
-    github.selfLogin()
-  ])
-  const sessions: string[] = []
-  for (const tracking of findAllTracking(comments, self)) {
-    const { sid } = tracking.state
-    const session = await factory.getSession(sid)
-    if (!session) continue
-    if (session.status !== 'idle') await factory.interrupt(sid)
-    await factory.postMessage(sid, cleanupPrompt(t), inputs.messageTimeoutMs)
-    sessions.push(sid)
-    core.info(`Asked session ${sid} (${tracking.state.lane}) to clean up`)
-    const body = renderTracking(tracking.state, {
-      sessionUrl: sessionUrl(sid),
-      reused: true,
-      runUrl: deps.runUrl,
-      status: 'Closed (cleanup requested)'
-    })
-    await github
-      .updateIssueComment(tracking.id, body)
-      .catch((err) =>
-        core.warning(`Could not update the tracking comment: ${err}`)
-      )
-  }
-  if (sessions.length === 0) core.info('No sessions to clean up')
-  return { skipped: '', sessionId: sessions.join(','), reused: true }
-}
-
-async function cleanupEnvironment(
-  inputs: Inputs,
-  t: Trigger,
-  deps: Deps
-): Promise<Outcome> {
-  const { github, factory } = deps
-  if (t.number === undefined) return { skipped: 'no-trigger' }
-  const [comments, self, computers] = await Promise.all([
-    github.listIssueComments(t.number),
-    github.selfLogin(),
-    factory.listComputers()
-  ])
-  const trackings = findAllTracking(comments, self)
-  const prefix = threadPrefix(t.owner, t.repo, t.number)
-  const targets = new Map(
-    computers
-      .filter(
-        (computer) =>
-          computer.name.startsWith(prefix) &&
-          isFromEnvironment(computer, inputs.environmentId)
-      )
-      .map((computer) => [computer.id, computer])
-  )
-  const unmanaged = new Set<string>()
-  const alreadyAbsent = new Set<string>()
-  for (const { state } of trackings) {
-    if (!state.cid || targets.has(state.cid)) continue
-    const computer = await factory.findComputer(state.cid)
-    if (
-      computer?.name.startsWith(prefix) &&
-      isFromEnvironment(computer, inputs.environmentId)
-    ) {
-      targets.set(computer.id, computer)
-    } else if (!computer) {
-      alreadyAbsent.add(state.cid)
-    } else {
-      unmanaged.add(state.cid)
-    }
-  }
-
-  const deleted = new Set<string>()
-  const deletionFailures: string[] = []
-  for (const computerId of targets.keys()) {
-    try {
-      if (await factory.deleteComputer(computerId)) deleted.add(computerId)
-      else alreadyAbsent.add(computerId)
-    } catch (err) {
-      deletionFailures.push(computerId)
-      core.warning(`Could not delete computer ${computerId}: ${err}`)
-    }
-  }
-
-  for (const tracking of trackings) {
-    const cid = tracking.state.cid
-    if (!cid) continue
-    const status =
-      cid && deletionFailures.includes(cid)
-        ? 'Closed (computer deletion failed)'
-        : unmanaged.has(cid)
-          ? 'Closed (computer not managed)'
-          : alreadyAbsent.has(cid) || (!deleted.has(cid) && !targets.has(cid))
-            ? 'Closed (computer already absent)'
-            : 'Closed (computer deleted)'
-    const body = renderTracking(tracking.state, {
-      sessionUrl: sessionUrl(tracking.state.sid),
-      reused: true,
-      runUrl: deps.runUrl,
-      status
-    })
-    await github
-      .updateIssueComment(tracking.id, body)
-      .catch((err) =>
-        core.warning(`Could not update the tracking comment: ${err}`)
-      )
-  }
-
-  if (targets.size === 0) core.info('No Environment computers to delete')
-  if (deletionFailures.length > 0) {
-    throw new Error(
-      `Could not delete Environment computers: ${deletionFailures.join(', ')}`
-    )
-  }
-  return {
-    skipped: '',
-    computerId: [...deleted].join(','),
-    reused: true
-  }
+  lane: Lane,
+  sessionId: string
+): LaneState {
+  const state: LaneState = { v: 1, lane: inputs.lane, sid: sessionId }
+  if (lane.environmentComputer) state.cid = lane.environmentComputer.id
+  if (lane.isPush && t.pr) state.sha = t.pr.headSha
+  return state
 }
 
 async function resolveRepoDir(
@@ -418,15 +402,19 @@ function resolveComputerCwd(
 function sessionRequest(
   inputs: Inputs,
   t: Trigger,
-  cwd: string,
-  runId: number,
-  computerId: string,
-  workspace: Workspace
+  lane: Lane,
+  cwd: string
 ): CreateSessionRequest {
   const repo = `${t.owner}/${t.repo}`
-  const key = t.number !== undefined ? String(t.number) : `run-${runId}`
+  const workspace: Workspace = lane.environmentComputer
+    ? { kind: 'clone', branch: lane.branch }
+    : {
+        kind: 'worktree',
+        path: `${cwd.replace(/\/+$/, '')}.worktrees/${inputs.lane}-${lane.key}`,
+        branch: lane.branch
+      }
   return {
-    computerId,
+    computerId: lane.computerId,
     cwd,
     sessionSettings: {
       ...(inputs.model ? { model: inputs.model } : {}),
@@ -438,7 +426,7 @@ function sessionRequest(
       tags: [
         {
           name: 'factory-action',
-          metadata: { repo, number: key, lane: inputs.lane }
+          metadata: { repo, number: lane.key, lane: inputs.lane }
         }
       ],
       systemPrompt: {

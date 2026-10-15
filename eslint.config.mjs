@@ -13,6 +13,58 @@ const compat = new FlatCompat({
   allConfig: js.configs.all
 })
 
+// Naming conventions; AGENTS.md (Conventions) documents them.
+const namingConvention = [
+  'error',
+  {
+    selector: 'default',
+    format: ['camelCase'],
+    leadingUnderscore: 'allow',
+    trailingUnderscore: 'forbid'
+  },
+  // UPPER_CASE is for module-level constants such as MODES or DROID_MARKER.
+  {
+    selector: 'variable',
+    modifiers: ['const'],
+    format: ['camelCase', 'UPPER_CASE']
+  },
+  { selector: 'import', format: ['camelCase', 'PascalCase'] },
+  { selector: 'typeLike', format: ['PascalCase'] },
+  { selector: 'enumMember', format: ['PascalCase', 'UPPER_CASE'] },
+  // Properties mirror external shapes: GitHub webhook payloads and REST
+  // bodies (snake_case), environment variables (UPPER_CASE).
+  {
+    selector: 'typeProperty',
+    format: ['camelCase', 'snake_case', 'UPPER_CASE']
+  },
+  // Object literals also name HTTP headers (Authorization) and globals.
+  {
+    selector: 'objectLiteralProperty',
+    format: ['camelCase', 'snake_case', 'UPPER_CASE', 'PascalCase']
+  },
+  // Keys that must be quoted (HTTP headers, 'pull_request.opened') are data.
+  {
+    selector: [
+      'objectLiteralProperty',
+      'objectLiteralMethod',
+      'typeProperty',
+      'typeMethod'
+    ],
+    modifiers: ['requiresQuotes'],
+    format: null
+  },
+  // An option name typescript-eslint chose to look alarming.
+  {
+    selector: 'objectLiteralProperty',
+    filter: {
+      regex:
+        '^maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING$',
+      match: true
+    },
+    format: null
+  }
+]
+
 export default [
   {
     ignores: ['**/coverage', '**/dist', '**/linter', '**/node_modules']
@@ -43,9 +95,12 @@ export default [
       parserOptions: {
         projectService: {
           allowDefaultProject: [
+            '.dependency-cruiser.cjs',
             '__fixtures__/*.ts',
             '__tests__/*.ts',
             '__tests__/integration/*.ts',
+            'script/*.ts',
+            'script/lib/*.ts',
             'script/qa/*.ts',
             'eslint.config.mjs'
           ],
@@ -73,7 +128,32 @@ export default [
       'no-console': 'off',
       'no-shadow': 'off',
       'no-unused-vars': 'off',
-      'prettier/prettier': 'error'
+      'prettier/prettier': 'error',
+
+      // Size and complexity budgets; AGENTS.md (Conventions) explains them.
+      complexity: ['error', 15],
+      'max-depth': ['error', 4],
+      'max-params': ['error', 4],
+      'max-lines': [
+        'error',
+        { max: 400, skipBlankLines: true, skipComments: true }
+      ],
+
+      '@typescript-eslint/naming-convention': namingConvention
+    }
+  },
+  {
+    files: ['**/*.cjs'],
+    languageOptions: { sourceType: 'commonjs' }
+  },
+  {
+    // Table-driven test suites grow with each scenario; still cap them.
+    files: ['__tests__/**/*.ts'],
+    rules: {
+      'max-lines': [
+        'error',
+        { max: 700, skipBlankLines: true, skipComments: true }
+      ]
     }
   }
 ]

@@ -37,5 +37,20 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+      - name: Dead Code and Unused Dependencies
+        run: bun run knip
+
+      - name: Module Boundaries
+        run: bun run depcruise
+
+      - name: Duplicate Code
+        run: bun run jscpd
+
+      - name: File Sizes
+        run: bun run check:size
+
+      - name: Tech-Debt Markers
+        run: bun run check:todos
+
       - name: Test
         run: bun run ci-test

@@ -1,6 +1,6 @@
 import * as core from '@actions/core'
 
-export const MODES = [
+const MODES = [
   'mention',
   'review',
   'security',
@@ -12,11 +12,11 @@ export const MODES = [
 ] as const
 export type Mode = (typeof MODES)[number]
 
-export const AUTONOMY_LEVELS = ['off', 'low', 'medium', 'high'] as const
-export type AutonomyLevel = (typeof AUTONOMY_LEVELS)[number]
+const AUTONOMY_LEVELS = ['off', 'low', 'medium', 'high'] as const
+type AutonomyLevel = (typeof AUTONOMY_LEVELS)[number]
 
 /** Skills and plugin commands that `@factory <name>` runs as `/<name>`. */
-export const DEFAULT_COMMANDS =
+const DEFAULT_COMMANDS =
   'security-review,deep-security-review,qa,wiki,verify,qa-test,demo'
 
 export interface Inputs {
@@ -109,7 +109,7 @@ export function getInputs(): Inputs {
   }
 }
 
-export function defaultLane(mode: Mode): string {
+function defaultLane(mode: Mode): string {
   return mode === 'mention' ? 'task' : mode
 }
 

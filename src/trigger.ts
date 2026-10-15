@@ -61,71 +61,68 @@ export function parseEvent(
     isPR: false
   }
 
-  switch (event) {
-    case 'issue_comment': {
-      const { issue, comment } = payload
-      return {
-        ...base,
-        number: issue.number,
-        isPR: Boolean(issue.pull_request),
-        url: issue.html_url,
-        title: issue.title,
-        body: issue.body ?? '',
-        author: author(comment.user, comment.author_association),
-        text: comment.body ?? '',
-        reaction: { kind: 'issue-comment', id: comment.id }
-      }
-    }
-    case 'pull_request_review_comment': {
-      const { pull_request: pr, comment } = payload
-      return {
-        ...base,
-        ...fromPull(pr),
-        author: author(comment.user, comment.author_association),
-        text: comment.body ?? '',
-        reaction: { kind: 'review-comment', id: comment.id },
-        reviewContext: {
-          path: comment.path,
-          line: comment.line ?? comment.original_line ?? undefined,
-          diffHunk: comment.diff_hunk ?? ''
-        }
-      }
-    }
-    case 'pull_request_review': {
-      const { pull_request: pr, review } = payload
-      return {
-        ...base,
-        ...fromPull(pr),
-        author: author(review.user, review.author_association),
-        text: review.body ?? ''
-      }
-    }
-    case 'issues': {
-      const { issue } = payload
-      return {
-        ...base,
-        number: issue.number,
-        url: issue.html_url,
-        title: issue.title,
-        body: issue.body ?? '',
-        author: author(issue.user, issue.author_association),
-        text: issue.body ?? '',
-        reaction: { kind: 'issue', id: issue.number }
-      }
-    }
-    case 'pull_request':
-    case 'pull_request_target': {
-      const { pull_request: pr } = payload
-      return {
-        ...base,
-        ...fromPull(pr),
-        author: author(pr.user, pr.author_association)
-      }
-    }
-    default:
-      return base
-  }
+  const parse = PARSERS.get(event)
+  return parse ? { ...base, ...parse(payload) } : base
 }
+
+type Parser = (payload: any) => Partial<Trigger>
+
+const fromPullRequest: Parser = ({ pull_request: pr }) => ({
+  ...fromPull(pr),
+  author: author(pr.user, pr.author_association)
+})
+
+const PARSERS = new Map<string, Parser>([
+  [
+    'issue_comment',
+    ({ issue, comment }) => ({
+      number: issue.number,
+      isPR: Boolean(issue.pull_request),
+      url: issue.html_url,
+      title: issue.title,
+      body: issue.body ?? '',
+      author: author(comment.user, comment.author_association),
+      text: comment.body ?? '',
+      reaction: { kind: 'issue-comment', id: comment.id }
+    })
+  ],
+  [
+    'pull_request_review_comment',
+    ({ pull_request: pr, comment }) => ({
+      ...fromPull(pr),
+      author: author(comment.user, comment.author_association),
+      text: comment.body ?? '',
+      reaction: { kind: 'review-comment', id: comment.id },
+      reviewContext: {
+        path: comment.path,
+        line: comment.line ?? comment.original_line ?? undefined,
+        diffHunk: comment.diff_hunk ?? ''
+      }
+    })
+  ],
+  [
+    'pull_request_review',
+    ({ pull_request: pr, review }) => ({
+      ...fromPull(pr),
+      author: author(review.user, review.author_association),
+      text: review.body ?? ''
+    })
+  ],
+  [
+    'issues',
+    ({ issue }) => ({
+      number: issue.number,
+      url: issue.html_url,
+      title: issue.title,
+      body: issue.body ?? '',
+      author: author(issue.user, issue.author_association),
+      text: issue.body ?? '',
+      reaction: { kind: 'issue', id: issue.number }
+    })
+  ],
+  ['pull_request', fromPullRequest],
+  ['pull_request_target', fromPullRequest]
+])
 
 function fromPull(pr: any): Partial<Trigger> {
   return {
@@ -174,44 +171,63 @@ export function precheck(
   t: Trigger,
   opts: { triggerPhrase: string; allowedBots: string[] }
 ): SkipReason | undefined {
-  if (mode === 'mention') {
-    if (!MENTION_EVENTS[t.event]) {
-      throw new Error(
-        `mode 'mention' does not support the '${t.event}' event. Supported: ${Object.keys(MENTION_EVENTS).join(', ')}`
-      )
-    }
-    if (!MENTION_EVENTS[t.event].includes(t.action ?? '')) return 'no-trigger'
-    if (isBotOrDroid(t, opts.allowedBots)) return 'bot'
-    if (!containsTrigger(t.text ?? '', opts.triggerPhrase)) return 'no-trigger'
-    return undefined
+  switch (mode) {
+    case 'mention':
+      return mentionSkip(t, opts)
+    case 'cleanup':
+      return cleanupSkip(t)
+    // deep-security and wiki cover the whole repository, not one thread.
+    case 'deep-security':
+    case 'wiki':
+      return repositorySkip(mode, t)
+    case 'custom':
+      return customSkip(t, opts.allowedBots)
+    default:
+      // review / security / qa
+      return pullRequestSkip(mode, t)
   }
+}
 
-  if (mode === 'cleanup') {
-    if (!CLOSE_EVENTS.includes(t.event)) {
-      throw new Error(
-        `mode 'cleanup' supports only ${CLOSE_EVENTS.join(', ')} (closed), got '${t.event}'`
-      )
-    }
-    return t.action === 'closed' ? undefined : 'no-trigger'
+function mentionSkip(
+  t: Trigger,
+  opts: { triggerPhrase: string; allowedBots: string[] }
+): SkipReason | undefined {
+  if (!MENTION_EVENTS[t.event]) {
+    throw new Error(
+      `mode 'mention' does not support the '${t.event}' event. Supported: ${Object.keys(MENTION_EVENTS).join(', ')}`
+    )
   }
+  if (!MENTION_EVENTS[t.event].includes(t.action ?? '')) return 'no-trigger'
+  if (isBotOrDroid(t, opts.allowedBots)) return 'bot'
+  if (!containsTrigger(t.text ?? '', opts.triggerPhrase)) return 'no-trigger'
+  return undefined
+}
 
-  // deep-security and wiki cover the whole repository, not one thread.
-  if (mode === 'deep-security' || mode === 'wiki') {
-    if (!SCHEDULED_EVENTS.includes(t.event)) {
-      throw new Error(
-        `mode '${mode}' works on the whole repository and supports only ${SCHEDULED_EVENTS.join(', ')}, got '${t.event}'`
-      )
-    }
-    return undefined
+function cleanupSkip(t: Trigger): SkipReason | undefined {
+  if (!CLOSE_EVENTS.includes(t.event)) {
+    throw new Error(
+      `mode 'cleanup' supports only ${CLOSE_EVENTS.join(', ')} (closed), got '${t.event}'`
+    )
   }
+  return t.action === 'closed' ? undefined : 'no-trigger'
+}
 
-  if (mode === 'custom') {
-    if (t.text !== undefined && isBotOrDroid(t, opts.allowedBots)) return 'bot'
-    if (t.pr && isFork(t)) return 'fork'
-    return undefined
+function repositorySkip(mode: Mode, t: Trigger): SkipReason | undefined {
+  if (!SCHEDULED_EVENTS.includes(t.event)) {
+    throw new Error(
+      `mode '${mode}' works on the whole repository and supports only ${SCHEDULED_EVENTS.join(', ')}, got '${t.event}'`
+    )
   }
+  return undefined
+}
 
-  // review / security / qa
+function customSkip(t: Trigger, allowedBots: string[]): SkipReason | undefined {
+  if (t.text !== undefined && isBotOrDroid(t, allowedBots)) return 'bot'
+  if (t.pr && isFork(t)) return 'fork'
+  return undefined
+}
+
+function pullRequestSkip(mode: Mode, t: Trigger): SkipReason | undefined {
   if (t.event !== 'pull_request' && t.event !== 'pull_request_target') {
     throw new Error(
       `mode '${mode}' requires the 'pull_request' event, got '${t.event}'`

@@ -306,8 +306,9 @@ Droid Control commands need the plugin and its tools on the computer ([Computer 
 Development uses [Bun](https://bun.com) (version in `.bun-version`) as the package manager, test runner and bundler. The action itself still runs on GitHub's `node24` runtime: `bun build --target=node` bundles it into `dist/index.js`. To develop without installing anything locally, open the repository in the dev container (`.devcontainer/`): it provides the pinned Bun, Node.js 24 and installed dependencies, and works with VS Code Dev Containers, GitHub Codespaces and the Dev Containers CLI.
 
 ```sh
-bun install
-bun run all       # format, lint, typecheck, test, bundle dist/
+bun install       # also enables the pre-commit hook in .githooks/
+bun run all       # format, lint, typecheck, static checks, test, bundle dist/
+bun run check     # every check (lint, knip, dependency-cruiser, jscpd, size budgets), no tests
 ```
 
 To run the action against a local (simulated) event, copy [`.env.example`](./.env.example) to `.env`, fill in the required values (Factory API key, a Droid Computer id or Environment id, a GitHub PAT and a webhook payload file) and run `bun run local-action`. `.env` is gitignored; never commit real keys.

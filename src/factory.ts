@@ -27,7 +27,7 @@ export interface CreateComputerRequest {
   source: { kind: 'environment'; environmentId: string; isListed: boolean }
 }
 
-export interface SessionSettings {
+interface SessionSettings {
   model?: string
   reasoningEffort?: string
   interactionMode?: 'auto' | 'spec' | 'agi' | 'mission'

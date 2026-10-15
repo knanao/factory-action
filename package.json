@@ -26,18 +26,27 @@
   },
   "scripts": {
     "bundle": "bun run format:write && bun run package",
+    "check": "bun run format:check && bun run lint && bun run typecheck && bun run check:static && bun run check:bundle",
+    "check:bundle": "bun script/check-bundle-size.ts",
+    "check:size": "bun script/check-file-size.ts",
+    "check:static": "bun run knip && bun run depcruise && bun run jscpd && bun run check:size && bun run check:todos",
+    "check:todos": "bun script/check-todos.ts",
     "ci-test": "bun test --coverage",
+    "depcruise": "depcruise src __tests__ __fixtures__ script --config .dependency-cruiser.cjs",
     "format:write": "prettier --write .",
     "format:check": "prettier --check .",
+    "jscpd": "jscpd --config .jscpd.json && jscpd --config .jscpd.json --exit-code 1 src",
+    "knip": "knip",
     "lint": "eslint .",
     "local-action": "local-action . src/main.ts .env",
+    "prepare": "sh script/install-hooks.sh",
     "qa:mock": "bun script/qa/mock-api.ts",
     "qa:run": "bun script/qa/run.ts",
     "package": "rm -rf dist && bun build src/index.ts --target=node --format=esm --sourcemap=linked --outdir=dist",
     "test": "bun test",
     "test:integration": "bun test __tests__/integration",
     "typecheck": "tsc --noEmit",
-    "all": "bun run format:write && bun run lint && bun run typecheck && bun run test && bun run package"
+    "all": "bun run format:write && bun run lint && bun run typecheck && bun run check:static && bun run test && bun run package && bun run check:bundle"
   },
   "license": "MIT",
   "dependencies": {
@@ -45,7 +54,6 @@
     "@actions/github": "^9.1.1"
   },
   "devDependencies": {
-    "@eslint/compat": "^2.0.2",
     "@eslint/eslintrc": "^3.3.3",
     "@eslint/js": "^10.0.1",
     "@github/local-action": "^7.0.1",
@@ -53,10 +61,13 @@
     "@types/node": "^26.6.5",
     "@typescript-eslint/eslint-plugin": "^8.56.0",
     "@typescript-eslint/parser": "^8.56.0",
+    "dependency-cruiser": "^18.6.0",
     "eslint": "^10.0.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.5",
     "globals": "^17.13.0",
+    "jscpd": "^5.4.1",
+    "knip": "^6.41.0",
     "prettier": "^3.8.1",
     "typescript": "^6.0.3"
   }

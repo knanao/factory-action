@@ -23120,71 +23120,64 @@ function parseEvent(event, payload, owner, repo) {
     repo,
     isPR: false
   };
-  switch (event) {
-    case "issue_comment": {
-      const { issue, comment } = payload;
-      return {
-        ...base,
-        number: issue.number,
-        isPR: Boolean(issue.pull_request),
-        url: issue.html_url,
-        title: issue.title,
-        body: issue.body ?? "",
-        author: author(comment.user, comment.author_association),
-        text: comment.body ?? "",
-        reaction: { kind: "issue-comment", id: comment.id }
-      };
-    }
-    case "pull_request_review_comment": {
-      const { pull_request: pr, comment } = payload;
-      return {
-        ...base,
-        ...fromPull(pr),
-        author: author(comment.user, comment.author_association),
-        text: comment.body ?? "",
-        reaction: { kind: "review-comment", id: comment.id },
-        reviewContext: {
-          path: comment.path,
-          line: comment.line ?? comment.original_line ?? undefined,
-          diffHunk: comment.diff_hunk ?? ""
-        }
-      };
-    }
-    case "pull_request_review": {
-      const { pull_request: pr, review } = payload;
-      return {
-        ...base,
-        ...fromPull(pr),
-        author: author(review.user, review.author_association),
-        text: review.body ?? ""
-      };
-    }
-    case "issues": {
-      const { issue } = payload;
-      return {
-        ...base,
-        number: issue.number,
-        url: issue.html_url,
-        title: issue.title,
-        body: issue.body ?? "",
-        author: author(issue.user, issue.author_association),
-        text: issue.body ?? "",
-        reaction: { kind: "issue", id: issue.number }
-      };
-    }
-    case "pull_request":
-    case "pull_request_target": {
-      const { pull_request: pr } = payload;
-      return {
-        ...base,
-        ...fromPull(pr),
-        author: author(pr.user, pr.author_association)
-      };
-    }
-    default:
-      return base;
-  }
+  const parse = PARSERS.get(event);
+  return parse ? { ...base, ...parse(payload) } : base;
 }
+var fromPullRequest = ({ pull_request: pr }) => ({
+  ...fromPull(pr),
+  author: author(pr.user, pr.author_association)
+});
+var PARSERS = new Map([
+  [
+    "issue_comment",
+    ({ issue, comment }) => ({
+      number: issue.number,
+      isPR: Boolean(issue.pull_request),
+      url: issue.html_url,
+      title: issue.title,
+      body: issue.body ?? "",
+      author: author(comment.user, comment.author_association),
+      text: comment.body ?? "",
+      reaction: { kind: "issue-comment", id: comment.id }
+    })
+  ],
+  [
+    "pull_request_review_comment",
+    ({ pull_request: pr, comment }) => ({
+      ...fromPull(pr),
+      author: author(comment.user, comment.author_association),
+      text: comment.body ?? "",
+      reaction: { kind: "review-comment", id: comment.id },
+      reviewContext: {
+        path: comment.path,
+        line: comment.line ?? comment.original_line ?? undefined,
+        diffHunk: comment.diff_hunk ?? ""
+      }
+    })
+  ],
+  [
+    "pull_request_review",
+    ({ pull_request: pr, review }) => ({
+      ...fromPull(pr),
+      author: author(review.user, review.author_association),
+      text: review.body ?? ""
+    })
+  ],
+  [
+    "issues",
+    ({ issue }) => ({
+      number: issue.number,
+      url: issue.html_url,
+      title: issue.title,
+      body: issue.body ?? "",
+      author: author(issue.user, issue.author_association),
+      text: issue.body ?? "",
+      reaction: { kind: "issue", id: issue.number }
+    })
+  ],
+  ["pull_request", fromPullRequest],
+  ["pull_request_target", fromPullRequest]
+]);
 function fromPull(pr) {
   return {
     number: pr.number,
@@ -23215,37 +23208,52 @@ var MENTION_EVENTS = {
   issues: ["opened"]
 };
 function precheck(mode, t, opts) {
-  if (mode === "mention") {
-    if (!MENTION_EVENTS[t.event]) {
-      throw new Error(`mode 'mention' does not support the '${t.event}' event. Supported: ${Object.keys(MENTION_EVENTS).join(", ")}`);
-    }
-    if (!MENTION_EVENTS[t.event].includes(t.action ?? ""))
-      return "no-trigger";
-    if (isBotOrDroid(t, opts.allowedBots))
-      return "bot";
-    if (!containsTrigger(t.text ?? "", opts.triggerPhrase))
-      return "no-trigger";
-    return;
+  switch (mode) {
+    case "mention":
+      return mentionSkip(t, opts);
+    case "cleanup":
+      return cleanupSkip(t);
+    case "deep-security":
+    case "wiki":
+      return repositorySkip(mode, t);
+    case "custom":
+      return customSkip(t, opts.allowedBots);
+    default:
+      return pullRequestSkip(mode, t);
   }
-  if (mode === "cleanup") {
-    if (!CLOSE_EVENTS.includes(t.event)) {
-      throw new Error(`mode 'cleanup' supports only ${CLOSE_EVENTS.join(", ")} (closed), got '${t.event}'`);
-    }
-    return t.action === "closed" ? undefined : "no-trigger";
+}
+function mentionSkip(t, opts) {
+  if (!MENTION_EVENTS[t.event]) {
+    throw new Error(`mode 'mention' does not support the '${t.event}' event. Supported: ${Object.keys(MENTION_EVENTS).join(", ")}`);
   }
-  if (mode === "deep-security" || mode === "wiki") {
-    if (!SCHEDULED_EVENTS.includes(t.event)) {
-      throw new Error(`mode '${mode}' works on the whole repository and supports only ${SCHEDULED_EVENTS.join(", ")}, got '${t.event}'`);
-    }
-    return;
+  if (!MENTION_EVENTS[t.event].includes(t.action ?? ""))
+    return "no-trigger";
+  if (isBotOrDroid(t, opts.allowedBots))
+    return "bot";
+  if (!containsTrigger(t.text ?? "", opts.triggerPhrase))
+    return "no-trigger";
+  return;
+}
+function cleanupSkip(t) {
+  if (!CLOSE_EVENTS.includes(t.event)) {
+    throw new Error(`mode 'cleanup' supports only ${CLOSE_EVENTS.join(", ")} (closed), got '${t.event}'`);
   }
-  if (mode === "custom") {
-    if (t.text !== undefined && isBotOrDroid(t, opts.allowedBots))
-      return "bot";
-    if (t.pr && isFork(t))
-      return "fork";
-    return;
+  return t.action === "closed" ? undefined : "no-trigger";
+}
+function repositorySkip(mode, t) {
+  if (!SCHEDULED_EVENTS.includes(t.event)) {
+    throw new Error(`mode '${mode}' works on the whole repository and supports only ${SCHEDULED_EVENTS.join(", ")}, got '${t.event}'`);
   }
+  return;
+}
+function customSkip(t, allowedBots) {
+  if (t.text !== undefined && isBotOrDroid(t, allowedBots))
+    return "bot";
+  if (t.pr && isFork(t))
+    return "fork";
+  return;
+}
+function pullRequestSkip(mode, t) {
   if (t.event !== "pull_request" && t.event !== "pull_request_target") {
     throw new Error(`mode '${mode}' requires the 'pull_request' event, got '${t.event}'`);
   }
@@ -23480,6 +23488,112 @@ function renderTracking(state, opts) {
 `);
 }
 
+// src/cleanup.ts
+async function cleanup(inputs, t, deps) {
+  if (inputs.environmentId)
+    return cleanupEnvironment(inputs, t, deps);
+  const { github, factory } = deps;
+  const [comments, self] = await Promise.all([
+    github.listIssueComments(t.number),
+    github.selfLogin()
+  ]);
+  const sessions = [];
+  for (const tracking of findAllTracking(comments, self)) {
+    const { sid } = tracking.state;
+    const session = await factory.getSession(sid);
+    if (!session)
+      continue;
+    if (session.status !== "idle")
+      await factory.interrupt(sid);
+    await factory.postMessage(sid, cleanupPrompt(t), inputs.messageTimeoutMs);
+    sessions.push(sid);
+    info(`Asked session ${sid} (${tracking.state.lane}) to clean up`);
+    await closeTracking(deps, tracking, "Closed (cleanup requested)");
+  }
+  if (sessions.length === 0)
+    info("No sessions to clean up");
+  return { sessionId: sessions.join(",") };
+}
+async function cleanupEnvironment(inputs, t, deps) {
+  const { github, factory } = deps;
+  const [comments, self, computers] = await Promise.all([
+    github.listIssueComments(t.number),
+    github.selfLogin(),
+    factory.listComputers()
+  ]);
+  const trackings = findAllTracking(comments, self);
+  const prefix = threadPrefix(t.owner, t.repo, t.number);
+  const owned = (computer) => computer.name.startsWith(prefix) && isFromEnvironment(computer, inputs.environmentId);
+  const plan = await planCleanup(factory, trackings, computers, owned);
+  const deletion = await deleteTargets(factory, plan);
+  for (const tracking of trackings) {
+    const cid = tracking.state.cid;
+    if (!cid)
+      continue;
+    await closeTracking(deps, tracking, cleanupStatus(cid, plan, deletion));
+  }
+  if (plan.targets.size === 0)
+    info("No Environment computers to delete");
+  if (deletion.failures.length > 0) {
+    throw new Error(`Could not delete Environment computers: ${deletion.failures.join(", ")}`);
+  }
+  return { computerId: [...deletion.deleted].join(",") };
+}
+async function planCleanup(factory, trackings, computers, owned) {
+  const targets = new Map(computers.filter(owned).map((computer) => [computer.id, computer]));
+  const unmanaged = new Set;
+  const alreadyAbsent = new Set;
+  for (const { state } of trackings) {
+    if (!state.cid || targets.has(state.cid))
+      continue;
+    const computer = await factory.findComputer(state.cid);
+    if (computer && owned(computer)) {
+      targets.set(computer.id, computer);
+    } else if (!computer) {
+      alreadyAbsent.add(state.cid);
+    } else {
+      unmanaged.add(state.cid);
+    }
+  }
+  return { targets, unmanaged, alreadyAbsent };
+}
+async function deleteTargets(factory, plan) {
+  const deleted = new Set;
+  const failures = [];
+  for (const computerId of plan.targets.keys()) {
+    try {
+      if (await factory.deleteComputer(computerId))
+        deleted.add(computerId);
+      else
+        plan.alreadyAbsent.add(computerId);
+    } catch (err) {
+      failures.push(computerId);
+      warning(`Could not delete computer ${computerId}: ${err}`);
+    }
+  }
+  return { deleted, failures };
+}
+function cleanupStatus(cid, plan, deletion) {
+  if (deletion.failures.includes(cid)) {
+    return "Closed (computer deletion failed)";
+  }
+  if (plan.unmanaged.has(cid))
+    return "Closed (computer not managed)";
+  if (plan.alreadyAbsent.has(cid) || !deletion.deleted.has(cid) && !plan.targets.has(cid)) {
+    return "Closed (computer already absent)";
+  }
+  return "Closed (computer deleted)";
+}
+async function closeTracking(deps, tracking, status) {
+  const body = renderTracking(tracking.state, {
+    sessionUrl: sessionUrl(tracking.state.sid),
+    reused: true,
+    runUrl: deps.runUrl,
+    status
+  });
+  await deps.github.updateIssueComment(tracking.id, body).catch((err) => warning(`Could not update the tracking comment: ${err}`));
+}
+
 // src/delegate.ts
 async function delegate(inputs, t, deps) {
   const { github, factory } = deps;
@@ -23488,89 +23602,160 @@ async function delegate(inputs, t, deps) {
     info(`Skipped: ${skip}`);
     return { skipped: skip };
   }
-  if (inputs.mode === "cleanup")
-    return cleanup(inputs, t, deps);
-  if (needsAuthorization(t)) {
-    const authz = await authorize(t.author, {
-      allowedAssociations: inputs.allowedAssociations,
-      permissionFallback: inputs.permissionFallback,
-      getPermission: (login) => github.getPermission(login)
-    });
-    if (!authz.allowed) {
-      notice(`@${t.author.login} is not allowed to trigger Droid (${authz.reason})`);
-      return { skipped: "unauthorized" };
-    }
-    info(`Authorized @${t.author.login} (${authz.reason})`);
+  if (inputs.mode === "cleanup") {
+    const { number } = t;
+    if (number === undefined)
+      return { skipped: "no-trigger" };
+    const cleaned = await cleanup(inputs, { ...t, number }, deps);
+    return { skipped: "", ...cleaned, reused: true };
+  }
+  if (!await isAuthorized(inputs, t, github)) {
+    return { skipped: "unauthorized" };
   }
   if (t.reaction) {
     await github.addEyes(t.reaction).catch((err) => warning(`Could not add reaction: ${err}`));
   }
-  const isPush = t.event === "pull_request" || t.event === "pull_request_target";
+  const lane = await resolveLane(inputs, t, deps);
+  const previous = await findPrevious(inputs, factory, lane);
+  await interruptUnreused(inputs, factory, lane, previous);
+  const previousSha = await supersede(factory, lane, previous);
+  const reused = previous.sessionId !== undefined;
+  let sessionId = previous.sessionId;
+  if (!sessionId) {
+    sessionId = await openSession(inputs, t, factory, lane);
+  } else {
+    info(`Reusing session ${sessionId}`);
+  }
+  const sent = await factory.postMessage(sessionId, buildPrompt(inputs.mode, promptContext(inputs, t, previousSha)), inputs.messageTimeoutMs);
+  if (sent.timedOut) {
+    warning(`No response from the messages endpoint within ${inputs.messageTimeoutMs} ms; assuming the message was accepted`);
+  }
+  const url = sessionUrl(sessionId);
+  if (t.number !== undefined) {
+    const body = renderTracking(laneState(inputs, t, lane, sessionId), {
+      sessionUrl: url,
+      reused,
+      runUrl: deps.runUrl
+    });
+    try {
+      if (lane.tracking)
+        await github.updateIssueComment(lane.tracking.id, body);
+      else
+        await github.createIssueComment(t.number, body);
+    } catch (err) {
+      warning(`Could not write the tracking comment: ${err}`);
+    }
+  }
+  return {
+    skipped: "",
+    sessionId,
+    sessionUrl: url,
+    reused,
+    computerId: lane.computerId
+  };
+}
+async function isAuthorized(inputs, t, github) {
+  if (!needsAuthorization(t))
+    return true;
+  const authz = await authorize(t.author, {
+    allowedAssociations: inputs.allowedAssociations,
+    permissionFallback: inputs.permissionFallback,
+    getPermission: (login) => github.getPermission(login)
+  });
+  if (!authz.allowed) {
+    notice(`@${t.author.login} is not allowed to trigger Droid (${authz.reason})`);
+    return false;
+  }
+  info(`Authorized @${t.author.login} (${authz.reason})`);
+  return true;
+}
+async function resolveLane(inputs, t, deps) {
   let tracking;
   if (t.number !== undefined) {
     const [comments, self] = await Promise.all([
-      github.listIssueComments(t.number),
-      github.selfLogin()
+      deps.github.listIssueComments(t.number),
+      deps.github.selfLogin()
     ]);
     tracking = findTracking(comments, inputs.lane, self);
   }
-  const key = t.number !== undefined ? String(t.number) : `run-${deps.runId}`;
-  const environmentComputer = inputs.environmentId ? await ensureComputer(factory, {
+  const key = laneKey(t, deps.runId);
+  const environmentComputer = inputs.environmentId ? await ensureComputer(deps.factory, {
     name: computerName(t.owner, t.repo, key, inputs.lane),
     environmentId: inputs.environmentId,
     timeoutMs: inputs.provisionTimeoutMs
   }) : undefined;
   const computerId = environmentComputer?.id ?? inputs.computerId;
   const cwd = inputs.cwd ? inputs.cwd : environmentComputer ? resolveComputerCwd(environmentComputer, computerId, t.repo) : undefined;
-  const branch = `factory/${inputs.lane}-${key}`;
-  let sessionId;
-  let previousSha;
-  let existing;
-  if (tracking && (inputs.reuseSession || environmentComputer)) {
-    existing = await factory.getSession(tracking.state.sid);
-    if (inputs.reuseSession && environmentComputer) {
-      const trackedComputer = tracking.state.cid ? await factory.findComputer(tracking.state.cid) : undefined;
-      const canReuse = existing?.computerId === tracking.state.cid && existing?.computerId === computerId && trackedComputer?.status === "active" && isFromEnvironment(trackedComputer, inputs.environmentId);
-      if (canReuse && existing) {
-        sessionId = existing.sessionId;
-      } else {
-        info(`Tracked Environment session ${tracking.state.sid} is no longer on its active computer; creating a new one`);
-      }
-    } else if (inputs.reuseSession && existing?.computerId && existing.computerId !== computerId) {
-      info(`Session ${existing.sessionId} runs on computer ${existing.computerId}, not ${computerId}; creating a new one`);
-    } else if (inputs.reuseSession && existing) {
-      sessionId = existing.sessionId;
-    } else if (!existing) {
-      info(`Session ${tracking.state.sid} no longer exists; creating a new one`);
-    }
+  return {
+    isPush: t.event === "pull_request" || t.event === "pull_request_target",
+    key,
+    branch: `factory/${inputs.lane}-${key}`,
+    tracking,
+    environmentComputer,
+    computerId,
+    cwd,
+    headSha: t.pr?.headSha
+  };
+}
+function laneKey(t, runId) {
+  return t.number !== undefined ? String(t.number) : `run-${runId}`;
+}
+async function findPrevious(inputs, factory, lane) {
+  const { tracking, environmentComputer, computerId } = lane;
+  if (!tracking || !(inputs.reuseSession || environmentComputer))
+    return {};
+  const existing = await factory.getSession(tracking.state.sid);
+  if (inputs.reuseSession && environmentComputer) {
+    return reuseOnEnvironment(inputs, factory, tracking.state, {
+      existing,
+      computerId
+    });
   }
-  if (environmentComputer && !inputs.reuseSession && existing && existing.computerId === computerId && existing.status !== "idle") {
+  if (inputs.reuseSession && existing?.computerId && existing.computerId !== computerId) {
+    info(`Session ${existing.sessionId} runs on computer ${existing.computerId}, not ${computerId}; creating a new one`);
+    return { existing };
+  }
+  if (inputs.reuseSession && existing) {
+    return { existing, sessionId: existing.sessionId };
+  }
+  if (!existing) {
+    info(`Session ${tracking.state.sid} no longer exists; creating a new one`);
+  }
+  return { existing };
+}
+async function reuseOnEnvironment(inputs, factory, state, { existing, computerId }) {
+  const trackedComputer = state.cid ? await factory.findComputer(state.cid) : undefined;
+  const canReuse = existing?.computerId === state.cid && existing?.computerId === computerId && trackedComputer?.status === "active" && isFromEnvironment(trackedComputer, inputs.environmentId);
+  if (canReuse && existing)
+    return { existing, sessionId: existing.sessionId };
+  info(`Tracked Environment session ${state.sid} is no longer on its active computer; creating a new one`);
+  return { existing };
+}
+async function interruptUnreused(inputs, factory, lane, { existing }) {
+  if (lane.environmentComputer && !inputs.reuseSession && existing && existing.computerId === lane.computerId && existing.status !== "idle") {
     info(`Interrupting previous session ${existing.sessionId}: reuse-session is disabled`);
     await factory.interrupt(existing.sessionId);
   }
-  if (sessionId && existing) {
-    if (isPush && existing.status !== "idle") {
-      info(`Interrupting running session ${sessionId}: a new push supersedes it`);
-      await factory.interrupt(sessionId);
-    }
-    if (isPush && existing.status === "idle" && tracking?.state.sha !== t.pr?.headSha)
-      previousSha = tracking?.state.sha;
+}
+async function supersede(factory, lane, { existing, sessionId }) {
+  if (!sessionId || !existing || !lane.isPush)
+    return;
+  if (existing.status !== "idle") {
+    info(`Interrupting running session ${sessionId}: a new push supersedes it`);
+    await factory.interrupt(sessionId);
+    return;
   }
-  const reused = sessionId !== undefined;
-  if (!sessionId) {
-    const sessionCwd = cwd ?? await resolveRepoDir(factory, computerId, t.repo);
-    const workspace = environmentComputer ? { kind: "clone", branch } : {
-      kind: "worktree",
-      path: `${sessionCwd.replace(/\/+$/, "")}.worktrees/${inputs.lane}-${key}`,
-      branch
-    };
-    const session = await factory.createSession(sessionRequest(inputs, t, sessionCwd, deps.runId, computerId, workspace));
-    sessionId = session.sessionId;
-    info(`Created session ${sessionId}`);
-  } else {
-    info(`Reusing session ${sessionId}`);
-  }
-  const text = buildPrompt(inputs.mode, {
+  const trackedSha = lane.tracking?.state.sha;
+  return trackedSha !== lane.headSha ? trackedSha : undefined;
+}
+async function openSession(inputs, t, factory, lane) {
+  const cwd = lane.cwd ?? await resolveRepoDir(factory, lane.computerId, t.repo);
+  const session = await factory.createSession(sessionRequest(inputs, t, lane, cwd));
+  info(`Created session ${session.sessionId}`);
+  return session.sessionId;
+}
+function promptContext(inputs, t, previousSha) {
+  return {
     repo: `${t.owner}/${t.repo}`,
     event: t.event,
     number: t.number,
@@ -23588,129 +23773,15 @@ async function delegate(inputs, t, deps) {
     extra: inputs.prompt,
     maxComments: inputs.maxComments,
     previousSha
-  });
-  const sent = await factory.postMessage(sessionId, text, inputs.messageTimeoutMs);
-  if (sent.timedOut) {
-    warning(`No response from the messages endpoint within ${inputs.messageTimeoutMs} ms; assuming the message was accepted`);
-  }
-  const url = sessionUrl(sessionId);
-  if (t.number !== undefined) {
-    const state = { v: 1, lane: inputs.lane, sid: sessionId };
-    if (environmentComputer)
-      state.cid = environmentComputer.id;
-    if (isPush && t.pr)
-      state.sha = t.pr.headSha;
-    const body = renderTracking(state, {
-      sessionUrl: url,
-      reused,
-      runUrl: deps.runUrl
-    });
-    try {
-      if (tracking)
-        await github.updateIssueComment(tracking.id, body);
-      else
-        await github.createIssueComment(t.number, body);
-    } catch (err) {
-      warning(`Could not write the tracking comment: ${err}`);
-    }
-  }
-  return { skipped: "", sessionId, sessionUrl: url, reused, computerId };
-}
-async function cleanup(inputs, t, deps) {
-  const { github, factory } = deps;
-  if (t.number === undefined)
-    return { skipped: "no-trigger" };
-  if (inputs.environmentId)
-    return cleanupEnvironment(inputs, t, deps);
-  const [comments, self] = await Promise.all([
-    github.listIssueComments(t.number),
-    github.selfLogin()
-  ]);
-  const sessions = [];
-  for (const tracking of findAllTracking(comments, self)) {
-    const { sid } = tracking.state;
-    const session = await factory.getSession(sid);
-    if (!session)
-      continue;
-    if (session.status !== "idle")
-      await factory.interrupt(sid);
-    await factory.postMessage(sid, cleanupPrompt(t), inputs.messageTimeoutMs);
-    sessions.push(sid);
-    info(`Asked session ${sid} (${tracking.state.lane}) to clean up`);
-    const body = renderTracking(tracking.state, {
-      sessionUrl: sessionUrl(sid),
-      reused: true,
-      runUrl: deps.runUrl,
-      status: "Closed (cleanup requested)"
-    });
-    await github.updateIssueComment(tracking.id, body).catch((err) => warning(`Could not update the tracking comment: ${err}`));
-  }
-  if (sessions.length === 0)
-    info("No sessions to clean up");
-  return { skipped: "", sessionId: sessions.join(","), reused: true };
-}
-async function cleanupEnvironment(inputs, t, deps) {
-  const { github, factory } = deps;
-  if (t.number === undefined)
-    return { skipped: "no-trigger" };
-  const [comments, self, computers] = await Promise.all([
-    github.listIssueComments(t.number),
-    github.selfLogin(),
-    factory.listComputers()
-  ]);
-  const trackings = findAllTracking(comments, self);
-  const prefix = threadPrefix(t.owner, t.repo, t.number);
-  const targets = new Map(computers.filter((computer) => computer.name.startsWith(prefix) && isFromEnvironment(computer, inputs.environmentId)).map((computer) => [computer.id, computer]));
-  const unmanaged = new Set;
-  const alreadyAbsent = new Set;
-  for (const { state } of trackings) {
-    if (!state.cid || targets.has(state.cid))
-      continue;
-    const computer = await factory.findComputer(state.cid);
-    if (computer?.name.startsWith(prefix) && isFromEnvironment(computer, inputs.environmentId)) {
-      targets.set(computer.id, computer);
-    } else if (!computer) {
-      alreadyAbsent.add(state.cid);
-    } else {
-      unmanaged.add(state.cid);
-    }
-  }
-  const deleted = new Set;
-  const deletionFailures = [];
-  for (const computerId of targets.keys()) {
-    try {
-      if (await factory.deleteComputer(computerId))
-        deleted.add(computerId);
-      else
-        alreadyAbsent.add(computerId);
-    } catch (err) {
-      deletionFailures.push(computerId);
-      warning(`Could not delete computer ${computerId}: ${err}`);
-    }
-  }
-  for (const tracking of trackings) {
-    const cid = tracking.state.cid;
-    if (!cid)
-      continue;
-    const status = cid && deletionFailures.includes(cid) ? "Closed (computer deletion failed)" : unmanaged.has(cid) ? "Closed (computer not managed)" : alreadyAbsent.has(cid) || !deleted.has(cid) && !targets.has(cid) ? "Closed (computer already absent)" : "Closed (computer deleted)";
-    const body = renderTracking(tracking.state, {
-      sessionUrl: sessionUrl(tracking.state.sid),
-      reused: true,
-      runUrl: deps.runUrl,
-      status
-    });
-    await github.updateIssueComment(tracking.id, body).catch((err) => warning(`Could not update the tracking comment: ${err}`));
-  }
-  if (targets.size === 0)
-    info("No Environment computers to delete");
-  if (deletionFailures.length > 0) {
-    throw new Error(`Could not delete Environment computers: ${deletionFailures.join(", ")}`);
-  }
-  return {
-    skipped: "",
-    computerId: [...deleted].join(","),
-    reused: true
   };
+}
+function laneState(inputs, t, lane, sessionId) {
+  const state = { v: 1, lane: inputs.lane, sid: sessionId };
+  if (lane.environmentComputer)
+    state.cid = lane.environmentComputer.id;
+  if (lane.isPush && t.pr)
+    state.sha = t.pr.headSha;
+  return state;
 }
 async function resolveRepoDir(factory, computerId, repo) {
   const computer = await factory.getComputer(computerId);
@@ -23723,11 +23794,15 @@ function resolveComputerCwd(computer, computerId, repo) {
   }
   return dir;
 }
-function sessionRequest(inputs, t, cwd, runId, computerId, workspace) {
+function sessionRequest(inputs, t, lane, cwd) {
   const repo = `${t.owner}/${t.repo}`;
-  const key = t.number !== undefined ? String(t.number) : `run-${runId}`;
+  const workspace = lane.environmentComputer ? { kind: "clone", branch: lane.branch } : {
+    kind: "worktree",
+    path: `${cwd.replace(/\/+$/, "")}.worktrees/${inputs.lane}-${lane.key}`,
+    branch: lane.branch
+  };
   return {
-    computerId,
+    computerId: lane.computerId,
     cwd,
     sessionSettings: {
       ...inputs.model ? { model: inputs.model } : {},
@@ -23737,7 +23812,7 @@ function sessionRequest(inputs, t, cwd, runId, computerId, workspace) {
       tags: [
         {
           name: "factory-action",
-          metadata: { repo, number: key, lane: inputs.lane }
+          metadata: { repo, number: lane.key, lane: inputs.lane }
         }
       ],
       systemPrompt: {
@@ -23943,5 +24018,5 @@ async function run() {
 // src/index.ts
 run();
 
-//# debugId=5373A8072FC2602164756E2164756E21
+//# debugId=68122AEBFE301D5C64756E2164756E21
 //# sourceMappingURL=index.js.map

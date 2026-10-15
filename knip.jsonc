@@ -1,0 +1,18 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // src/index.ts, the action's entry, is a knip default entry.
+  "entry": [
+    "__tests__/**/*.test.ts",
+    // Tests swap it in for @actions/core with mock.module(), which knip
+    // cannot follow, so its exports count as used.
+    "__fixtures__/core.ts",
+    "script/*.ts",
+    "script/qa/*.ts"
+  ],
+  "project": [
+    "src/**/*.ts",
+    "__tests__/**/*.ts",
+    "__fixtures__/**/*.ts",
+    "script/**/*.ts"
+  ]
+}

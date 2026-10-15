@@ -6,6 +6,7 @@ import {
   pullRequestEvent,
   REPO
 } from '../__fixtures__/payloads.js'
+import type { FactoryApi } from '../src/delegate.js'
 import type { GitHubApi } from '../src/github.js'
 import type { Inputs } from '../src/inputs.js'
 import { renderTracking } from '../src/state.js'
@@ -15,7 +16,6 @@ mock.module('@actions/core', () => core)
 const { computerName } = await import('../src/compute.js')
 const { delegate } = await import('../src/delegate.js')
 const { parseEvent } = await import('../src/trigger.js')
-type FactoryApi = import('../src/delegate.js').FactoryApi
 
 const SELF = 'github-actions[bot]'
 
