@@ -1,7 +1,7 @@
-import * as core from '@actions/core'
 import { createHash } from 'node:crypto'
 import type { Computer, FactoryClient } from './factory.js'
 import { FactoryApiError } from './factory.js'
+import { log } from './logger.js'
 
 /**
  * Environment mode gives every (issue/PR, lane) its own computer, created from
@@ -85,7 +85,7 @@ export async function ensureComputer(
 ): Promise<Computer> {
   let computer = await api.getComputerByName(opts.name)
   if (computer) {
-    core.info(`Found computer ${opts.name} (${computer.id})`)
+    log.info('computer.found', { computer_id: computer.id, name: opts.name })
   } else {
     try {
       computer = await api.createComputer({
@@ -96,7 +96,10 @@ export async function ensureComputer(
           isListed: false
         }
       })
-      core.info(`Created computer ${opts.name} (${computer.id})`)
+      log.info('computer.created', {
+        computer_id: computer.id,
+        name: opts.name
+      })
     } catch (err) {
       if (!(err instanceof FactoryApiError && err.status === 409)) throw err
       // Another run created it between the lookup and the create.

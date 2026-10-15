@@ -4,6 +4,7 @@ import { delegate } from './delegate.js'
 import { FactoryClient } from './factory.js'
 import { createGitHubApi } from './github.js'
 import { getInputs } from './inputs.js'
+import { log } from './logger.js'
 import { parseEvent } from './trigger.js'
 
 export async function run(): Promise<void> {
@@ -11,6 +12,13 @@ export async function run(): Promise<void> {
     const inputs = getInputs()
     const { owner, repo } = context.repo
     const trigger = parseEvent(context.eventName, context.payload, owner, repo)
+
+    log.info('run.started', {
+      repo: `${owner}/${repo}`,
+      github_event: context.eventName,
+      mode: inputs.mode,
+      lane: inputs.lane
+    })
 
     const outcome = await delegate(inputs, trigger, {
       github: createGitHubApi(inputs.githubToken, owner, repo),
@@ -50,6 +58,10 @@ export async function run(): Promise<void> {
         .write()
     }
   } catch (error) {
+    log.error('run.failed', {
+      error,
+      stack: error instanceof Error ? error.stack : undefined
+    })
     core.setFailed(error instanceof Error ? error.message : String(error))
   }
 }

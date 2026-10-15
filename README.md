@@ -236,6 +236,20 @@ This is enforced through the session's system prompt. It needs the Droid Control
 | `reused` | `true` if the message was a follow-up |
 | `skipped` | `''`, or `unauthorized` \| `no-trigger` \| `fork` \| `bot` \| `draft` |
 
+## Logging
+
+Every record the action writes to the run log is one structured line in logfmt, e.g. `level=info event=session.created session_id=sid-1`. Records stay readable in the Actions UI but remain machine-parseable when the run log is exported (Loki logfmt, Vector, `grep`).
+
+| Level | Emitted for | Actions UI |
+| --- | --- | --- |
+| `debug` | Diagnostics, e.g. the tracking comment a lane reuses | Hidden unless enabled below |
+| `info` | Skips, authorization, session and Environment computer lifecycle, cleanup | Plain log line |
+| `notice` | An outside user is denied | Notice annotation |
+| `warning` | Recoverable problems (reaction, tracking comment, message timeout) | Warning annotation |
+| `error` | The run failed, with the stack | Error annotation |
+
+`FACTORY_ACTION_LOG_LEVEL` (`debug` | `info` | `notice` | `warning` | `error`) filters records; by default everything from `info` up is emitted. GitHub's own `ACTIONS_STEP_DEBUG` flag also turns on `debug`.
+
 ## Computer setup
 
 `GITHUB_TOKEN` expires when the job ends, so **Droid writes to GitHub with credentials on the computer**, not with the workflow token.
