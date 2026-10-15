@@ -1,0 +1,19 @@
+{
+  "action": "synchronize",
+  "repository": { "full_name": "acme/widgets" },
+  "pull_request": {
+    "number": 7,
+    "html_url": "https://github.com/acme/widgets/pull/7",
+    "title": "Add widget",
+    "body": "Adds the widget.",
+    "draft": false,
+    "user": { "login": "alice", "type": "User" },
+    "author_association": "MEMBER",
+    "base": { "ref": "main", "sha": "base111" },
+    "head": {
+      "ref": "feature",
+      "sha": "head333",
+      "repo": { "full_name": "acme/widgets" }
+    }
+  }
+}
