@@ -303,12 +303,16 @@ Droid Control commands need the plugin and its tools on the computer ([Computer 
 
 ## Development
 
-Development uses [Bun](https://bun.com) (version in `.bun-version`) as the package manager, test runner and bundler. The action itself still runs on GitHub's `node24` runtime: `bun build --target=node` bundles it into `dist/index.js`.
+Development uses [Bun](https://bun.com) (version in `.bun-version`) as the package manager, test runner and bundler. The action itself still runs on GitHub's `node24` runtime: `bun build --target=node` bundles it into `dist/index.js`. To develop without installing anything locally, open the repository in the dev container (`.devcontainer/`): it provides the pinned Bun, Node.js 24 and installed dependencies, and works with VS Code Dev Containers, GitHub Codespaces and the Dev Containers CLI.
 
 ```sh
 bun install
 bun run all       # format, lint, typecheck, test, bundle dist/
 ```
+
+To run the action against a local (simulated) event, copy [`.env.example`](./.env.example) to `.env`, fill in the required values (Factory API key, a Droid Computer id or Environment id, a GitHub PAT and a webhook payload file) and run `bun run local-action`. `.env` is gitignored; never commit real keys.
+
+To run the action end to end offline, against a local mock of the Factory Sessions API and the GitHub REST API, use `bun run qa:mock` and `bun run qa:run <event-file>`. See [`.factory/skills/qa/SKILL.md`](./.factory/skills/qa/SKILL.md) for the scenarios and what to check.
 
 Unit tests live in `__tests__/` and mock the GitHub and Factory boundaries. `__tests__/integration/` goes further: it builds the bundle, runs it as a subprocess against localhost stubs of both APIs and checks the full path a runner takes (inputs, event parsing, authorization, session reuse, prompts, tracking state and outputs). Run it alone with `bun run test:integration`.
 
