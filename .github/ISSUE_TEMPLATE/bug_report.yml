@@ -1,0 +1,114 @@
+name: Bug report
+description: The action or the session it starts does not behave as documented.
+title: 'bug: '
+labels:
+  - 'type: bug'
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please fill in as much as you can.
+
+        **Do not report security vulnerabilities here.** Use the private
+        advisory flow described in [SECURITY.md](https://github.com/knanao/factory-action/blob/main/SECURITY.md) instead.
+
+        **Redact before you paste.** Remove Factory API keys, GitHub tokens,
+        private repository content and personal data from logs, workflow
+        files and screenshots. Issues are public.
+  - type: input
+    id: version
+    attributes:
+      label: Action version
+      description:
+        The ref in `uses:`, e.g. `knanao/factory-action@v0`, `@v0.1.0` or a
+        commit SHA.
+      placeholder: knanao/factory-action@v0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      description: The `mode` input of the failing step.
+      options:
+        - mention (default)
+        - review
+        - security
+        - deep-security
+        - qa
+        - wiki
+        - custom
+        - cleanup
+    validations:
+      required: true
+  - type: dropdown
+    id: target
+    attributes:
+      label: Run target
+      description: Which of the two inputs the step sets.
+      options:
+        - computer-id (existing Droid Computer)
+        - environment-id (one computer per issue/PR and lane)
+    validations:
+      required: true
+  - type: input
+    id: event
+    attributes:
+      label: Triggering event
+      description:
+        The workflow event and action, e.g. `issue_comment` (created),
+        `pull_request` (synchronize), `issues` (closed), `schedule`.
+      placeholder: issue_comment (created)
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Workflow snippet
+      description:
+        The job that runs the action, including `on:`, `if:` and `with:`.
+        Reference secrets by name (`secrets.FACTORY_API_KEY`); never paste their
+        values.
+      render: yaml
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description:
+        What happened instead, e.g. the step was skipped (the `skipped` output),
+        the session was not reused, Droid did not reply, or the step failed.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description:
+        The action's step log from the Actions run. The log can contain GitHub
+        logins, session and computer IDs; redact anything you do not want to
+        make public, and remove every key or token.
+      render: text
+  - type: input
+    id: run-url
+    attributes:
+      label: Workflow run URL
+      description:
+        Link to the failing run, if the repository is public. A Factory session
+        URL helps too.
+      placeholder: https://github.com/<owner>/<repo>/actions/runs/<id>
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description:
+        Anything else that helps, e.g. whether `permission-fallback` or
+        `allowed-bots` is set, or whether the PR comes from a fork.

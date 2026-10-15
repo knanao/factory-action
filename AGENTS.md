@@ -100,6 +100,8 @@ in an emergency, since CI runs the same checks.
   `check-dist.yml` (fails when `dist/` is stale or over its size budget),
   CodeQL, licensed, and `factory.yml`, which runs this action on itself for
   `@factory` mentions.
+- `.github/` also holds `CODEOWNERS`, `dependabot.yml`, the pull request
+  template and the issue forms (`ISSUE_TEMPLATE/`).
 
 ### Module boundaries
 
@@ -129,6 +131,14 @@ fails CI when `dist/` does not match the sources.
 
 - Commit messages follow Conventional Commits, e.g.
   `fix: review full PR diff after interrupted CI sessions`.
+- Pull requests fill in `.github/pull_request_template.md`. Every issue carries
+  one `type:`, one `priority:` and one `area:` label (PRs may use them too); the
+  taxonomy is in `CONTRIBUTING.md` (Issues and labels). `main` is protected by a
+  ruleset (PR, one approval, required checks), so never push to it directly.
+- Dependabot (`.github/dependabot.yml`) opens weekly update PRs after a 7-day
+  minimum release age (14 for npm majors). A runtime (`@actions/*`) update needs
+  `bun run package` and the rebuilt `dist/` pushed to the same branch; see
+  `CONTRIBUTING.md` (Dependency updates).
 - Add tests for behavior changes; they live in `__tests__/` and use the fixtures
   in `__fixtures__/`.
 - Keep docs in sync: when adding or changing an input, output, or mode, update
@@ -188,6 +198,11 @@ fails CI when `dist/` does not match the sources.
   `<!-- factory-action:state ... -->`; both must stay ignored so the action
   never triggers itself. The prompt must keep telling Droid never to write the
   trigger phrase.
+- Data handling is documented in `SECURITY.md` (Data handling and personal
+  data): what is read, sent to Factory, stored in the tracking comment and
+  logged. Update it when that changes. Never log comment bodies, PR text, diffs
+  or prompts, never store them in the state marker, and keep fixtures and QA
+  events fictional (`alice`, `acme/widgets`, placeholder keys).
 
 ## Verification
 

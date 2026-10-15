@@ -1,0 +1,63 @@
+name: Feature request
+description: Suggest a new capability or a change to an existing mode or input.
+title: 'feat: '
+labels:
+  - 'type: feature'
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Describe the problem first: a clear use case
+        helps more than a finished design.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way today?
+      placeholder:
+        When a PR is updated, I want the review lane to ... but today ...
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description:
+        How the action could solve it. Include new or changed inputs, outputs or
+        workflow examples if you have them in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description:
+        Workarounds you tried (another mode, a `custom` prompt, workflow
+        changes) and why they are not enough.
+  - type: dropdown
+    id: modes
+    attributes:
+      label: Affected modes
+      description: Which modes the change touches, if any.
+      multiple: true
+      options:
+        - mention
+        - review
+        - security
+        - deep-security
+        - qa
+        - wiki
+        - custom
+        - cleanup
+        - Not mode-specific
+  - type: input
+    id: inputs
+    attributes:
+      label: Affected inputs or outputs
+      description: Existing or new `action.yml` inputs and outputs involved.
+      placeholder: e.g. lane, reuse-session, environment-id
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links, related issues, or anything else.

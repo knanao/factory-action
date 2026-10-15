@@ -99,6 +99,7 @@ __tests__/runner/*
 
 # IDE files
 .idea
+.vscode/
 *.code-workspace
 
 # Design plan

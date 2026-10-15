@@ -294,6 +294,7 @@ Droid Control commands need the plugin and its tools on the computer ([Computer 
 - **Prompt injection.** GitHub content is passed as clearly delimited untrusted data, and the system prompt tells Droid not to follow instructions in it. Use a dedicated computer and least-privilege GitHub credentials. Remember that `autonomy-level: high` lets Droid run commands and push.
 - **Why `autonomy-level: high`.** Below `high`, a command Droid rates as high-risk (e.g. `git push`, `git branch -D`) waits for an approval that never comes, and the session stays `running` until it is interrupted. Autonomy is fixed when the session is created; changing it later does not affect a reused session.
 - **No secrets to Droid.** The workflow token is used only for the reaction and the tracking comment.
+- **Data handling.** The action sends the thread's title and URL, the triggering text and the requester's login (mentions) or the PR description (`review`, `security`, `qa`) to the Factory API and nowhere else. The tracking comment stores only the lane, session ID, last head SHA and Environment computer ID, and the log contains logins and IDs but no comment text. Do not put secrets or personal data in requests to Droid. See [Data handling and personal data](./SECURITY.md#data-handling-and-personal-data) for the details, retention and deletion.
 
 ## Limitations
 

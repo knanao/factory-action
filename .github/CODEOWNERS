@@ -1,0 +1,18 @@
+# Code owners are requested for review on every pull request that touches the
+# matching paths. Later rules take precedence over earlier ones.
+# See: https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+* @knanao
+
+# Security-sensitive paths: the action's public contract, authorization and
+# trigger parsing, the token-handling GitHub wrapper, the prompts that carry
+# the untrusted-content rules, the bundle GitHub runs, CI and governance.
+/action.yml @knanao
+/src/authz.ts @knanao
+/src/trigger.ts @knanao
+/src/github.ts @knanao
+/src/inputs.ts @knanao
+/src/prompts/ @knanao
+/dist/ @knanao
+/.github/ @knanao
+/SECURITY.md @knanao

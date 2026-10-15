@@ -1,0 +1,12 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/knanao/factory-action/security/advisories/new
+    about:
+      Report vulnerabilities privately through a draft security advisory, as
+      described in SECURITY.md. Do not open a public issue.
+  - name: Factory platform issues
+    url: https://docs.factory.com
+    about:
+      Problems with the Sessions API, Droid Computers or the Droid agent itself
+      belong to Factory, not to this action.

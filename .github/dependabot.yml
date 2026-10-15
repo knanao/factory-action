@@ -1,0 +1,73 @@
+# Dependabot version updates. Security updates are not configured here: they
+# follow the repository's Dependabot alerts and ignore the cooldown below.
+# See: https://docs.github.com/code-security/dependabot/working-with-dependabot/dependabot-options-reference
+
+version: 2
+updates:
+  # package.json and bun.lock. Updates to the runtime dependencies (@actions/*)
+  # change the bundle, so their pull requests need `bun run package` and a
+  # committed dist/ before the Check dist/ job passes.
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Etc/UTC
+    # A minimum release age: a version is proposed only once it has been
+    # public for a week (two for majors), so a compromised or broken release
+    # is usually yanked or flagged before it reaches this repository.
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    open-pull-requests-limit: 5
+    labels:
+      - 'type: chore'
+      - 'area: dependencies'
+    commit-message:
+      prefix: chore
+      include: scope
+    # The bun ecosystem does not support `dependency-type` in groups, so the
+    # runtime dependencies are separated by name. Major updates are not
+    # grouped: each gets its own pull request.
+    groups:
+      runtime:
+        patterns:
+          - '@actions/*'
+        update-types:
+          - minor
+          - patch
+      tooling:
+        patterns:
+          - '*'
+        exclude-patterns:
+          - '@actions/*'
+        update-types:
+          - minor
+          - patch
+
+  # Actions used by the workflows in .github/workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: Etc/UTC
+    # GitHub Actions supports only `default-days`.
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    labels:
+      - 'type: chore'
+      - 'area: dependencies'
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      github-actions:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch

@@ -97,14 +97,77 @@ The full scenario list and what to check is in
 - Releases are cut by the maintainer with `script/release`, which tags `vX.Y.Z`
   and moves the major tag `v1`.
 
+## Issues and labels
+
+Open issues with the **Bug report** or **Feature request** form; blank issues
+are disabled. Report security vulnerabilities privately as described in
+[SECURITY.md](./SECURITY.md), never in a public issue. Redact keys, tokens and
+personal data from anything you paste.
+
+Every open issue carries exactly one label from each of these groups. The forms
+set the type; the maintainer adds priority and area during triage.
+
+- **Type**, what kind of work it is: `type: bug`, `type: feature`, `type: docs`,
+  `type: chore` (tooling, refactors, dependency updates, releases), `type: test`
+  or `type: security` (hardening; not for undisclosed vulnerabilities).
+- **Priority**: `priority: P0` (breaks delegation for users or is a security
+  risk; fix now), `priority: P1` (important, no good workaround), `priority: P2`
+  (worth doing soon; a workaround exists) or `priority: P3` (nice to have, or
+  blocked on an external dependency).
+- **Area**, where the change lands: `area: triggers` (`trigger.ts`, `authz.ts`),
+  `area: sessions` (`delegate.ts`, `factory.ts`, `state.ts`),
+  `area: environments` (`compute.ts`, `cleanup.ts`), `area: prompts`
+  (`src/prompts/`), `area: ci` (workflows, checks, hooks, bundling, release),
+  `area: docs` (documentation and examples) or `area: dependencies` (package,
+  Bun and action versions).
+
+The GitHub defaults `duplicate`, `invalid`, `question`, `wontfix`,
+`good first issue`, `help wanted` and `accessibility` are kept as optional
+status labels. Pull requests may use the same labels; Dependabot labels its pull
+requests `type: chore` and `area: dependencies`.
+
+## Dependency updates
+
+Dependabot (`.github/dependabot.yml`) checks every Monday for new versions of
+the npm packages in `package.json`/`bun.lock` (the `bun` ecosystem) and of the
+GitHub Actions used by the workflows:
+
+- **Minimum release age.** A version is proposed only after it has been public
+  for 7 days, 14 for a major version of an npm package. The delay gives the
+  ecosystem time to catch a compromised or broken release before it lands here.
+  Vulnerable dependencies are still reported immediately through Dependabot
+  alerts.
+- **Grouping.** Minor and patch updates are grouped: the runtime dependencies
+  (`@actions/*`) in one pull request, the development tooling in another, and
+  the GitHub Actions in a third. Each major update gets its own pull request.
+- **Commit messages** follow Conventional Commits with a `chore` type and a
+  `deps` scope, e.g. `chore(deps): bump @actions/core from 3.0.1 to 3.1.0`.
+- **Runtime updates need a rebuilt `dist/`.** An update to `@actions/*` changes
+  the bundle, so the **Check dist/** job fails until `dist/` is rebuilt. Check
+  out the Dependabot branch, run `bun install --frozen-lockfile` and
+  `bun run package`, check `bun run check:bundle`, and push the rebuilt `dist/`
+  to that branch before merging. Tooling updates can also change formatting or
+  lint results; fix those on the branch the same way.
+
+Review the changelog of every update before merging, and treat a new install
+script, a new maintainer or an unexpected new dependency as a reason to pause.
+
 ## Pull requests
 
 1. Fork the repository and create a branch from `main`.
 2. Make your change and run `bun run all` until it is green.
-3. Open a pull request against `main` with a short description of the change and
-   its motivation.
+3. Open a pull request against `main` and fill in the pull request template:
+   description, related issue, potential risk and impact, and how it was tested.
 4. CI (format, lint, typecheck, static checks, tests, dist check with the bundle
    budget, CodeQL) must pass before review.
+
+`main` is protected by the **Protect main** repository ruleset: changes land
+only through pull requests, with one approving review (approvals are dismissed
+when new commits are pushed) and the required checks **TypeScript Tests**,
+**Check dist/** and **Analyze (typescript)** passing. Force pushes and deleting
+`main` are blocked. Repository admins can bypass the ruleset, for example to
+merge their own pull requests when no other reviewer is available.
+`.github/CODEOWNERS` requests a review from the maintainer automatically.
 
 ## License
 
