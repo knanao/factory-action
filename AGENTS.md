@@ -96,7 +96,8 @@ same checks.
 - `script/check-*.ts` — repository checks run with Bun (file sizes, tech-debt
   markers, bundle budget); `script/lib/` holds their shared helpers.
   `script/install-hooks.sh` enables the Git hooks.
-- `script/qa/` — the offline QA harness (mock APIs and sample events).
+- `script/qa/` — the offline QA harness (mock APIs, sample events and the
+  Bun-safe `local-action` wrapper).
 - `.githooks/` — the checked-in pre-commit hook.
 - `.github/workflows/` — CI (format, lint, typecheck, static checks, test),
   `check-dist.yml` (fails when `dist/` is stale or over its size budget),

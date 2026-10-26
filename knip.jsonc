@@ -14,5 +14,8 @@
     "__tests__/**/*.ts",
     "__fixtures__/**/*.ts",
     "script/**/*.ts"
-  ]
+  ],
+  // script/qa/local-action.ts spawns its bin directly, which knip cannot
+  // follow, so the devDependency counts as used.
+  "ignoreDependencies": ["@github/local-action"]
 }

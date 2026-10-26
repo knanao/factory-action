@@ -64,12 +64,13 @@ devcontainer up --workspace-folder .
 ## Trying the action locally
 
 To run the action against a local (simulated) event, copy `.env.example` to
-`.env` and fill in the required values: Factory API key, a Droid Computer id or
-Environment id, a GitHub PAT and a webhook payload file (`GITHUB_EVENT_PATH`).
-Then run:
+`.env` and fill in the required values for a real run: Factory API key, a Droid
+Computer id or Environment id, a GitHub PAT and a webhook payload file
+(`GITHUB_EVENT_PATH`). The shipped defaults already target the mock APIs below,
+so offline runs need no edits. Then run:
 
 ```sh
-bun run local-action   # local-action . src/main.ts .env
+bun run local-action   # via script/qa/local-action.ts (Bun-safe wrapper)
 ```
 
 To run the action end to end without Factory or GitHub credentials, start the

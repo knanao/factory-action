@@ -38,7 +38,7 @@
     "jscpd": "jscpd --config .jscpd.json && jscpd --config .jscpd.json --exit-code 1 src",
     "knip": "knip",
     "lint": "eslint .",
-    "local-action": "local-action . src/main.ts .env",
+    "local-action": "bun script/qa/local-action.ts",
     "prepare": "sh script/install-hooks.sh",
     "qa:mock": "bun script/qa/mock-api.ts",
     "qa:run": "bun script/qa/run.ts",
