@@ -149,6 +149,11 @@ GitHub Actions used by the workflows:
   to that branch before merging. Tooling updates can also change formatting or
   lint results; fix those on the branch the same way.
 
+TypeScript runs side by side: `@typescript/native` aliases TypeScript 7 and
+provides `tsc` for `bun run typecheck`, while `typescript` aliases
+`@typescript/typescript6` for tools that need the TypeScript 6 API, including
+`typescript-eslint`. Keep these aliases until those tools support the new API.
+
 Review the changelog of every update before merging, and treat a new install
 script, a new maintainer or an unexpected new dependency as a reason to pause.
 
