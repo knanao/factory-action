@@ -19,8 +19,9 @@ inside the action's own tracking comment.
 ## Commands
 
 Development uses [Bun](https://bun.com) (version pinned in `.bun-version`) as
-the package manager, test runner, and bundler. The action itself runs on
-GitHub's `node24` runtime.
+the package manager, test runner, bundler, and formatter: `bun fmt`, its
+built-in Prettier-compatible command. The action itself runs on GitHub's
+`node24` runtime.
 
 - Install dependencies: `bun install` (also enables the pre-commit hook, see
   below)
@@ -52,11 +53,12 @@ Static checks (`bun run check:static` runs the first five):
 
 `bun install` runs the `prepare` script (`script/install-hooks.sh`), which sets
 `git config core.hooksPath .githooks`; it does nothing in CI (`CI` set) or
-outside a git checkout. `.githooks/pre-commit` then runs Prettier and ESLint on
-the staged files, the typecheck and `bun run check:static`, in about five
-seconds. It replaces any hooks in `.git/hooks`. Agents must never bypass it
-(`git commit --no-verify`); fix the failure instead. Humans may bypass it only
-in an emergency, since CI runs the same checks.
+outside a git checkout. `.githooks/pre-commit` then runs
+`bun fmt --check --staged` and ESLint on the staged files, the typecheck and
+`bun run check:static`, in about five seconds. It replaces any hooks in
+`.git/hooks`. Agents must never bypass it (`git commit --no-verify`); fix the
+failure instead. Humans may bypass it only in an emergency, since CI runs the
+same checks.
 
 ## Project layout
 
@@ -143,9 +145,10 @@ fails CI when `dist/` does not match the sources.
   in `__fixtures__/`.
 - Keep docs in sync: when adding or changing an input, output, or mode, update
   both `action.yml` and the tables in `README.md`.
-- Prettier formatting is enforced (no semicolons, single quotes, 80 columns,
-  hard-wrapped prose). ESLint runs `prettier/prettier` as an error, so
-  formatting is not optional.
+- Formatting is enforced by `bun fmt`, Bun's built-in Prettier-compatible
+  formatter (no semicolons, single quotes, 80 columns, hard-wrapped prose; it
+  reads `.prettierrc.yml`). CI runs `bun run format:check` and the pre-commit
+  hook checks the staged files, so formatting is not optional.
 - TypeScript is strict (`strict`, `noUnusedLocals`). Tests and fixtures are
   excluded from `tsconfig.json` but still linted by ESLint.
 - Prefer the existing dependencies (`@actions/core`, `@actions/github`); do not

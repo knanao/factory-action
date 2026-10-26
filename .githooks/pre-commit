@@ -3,9 +3,10 @@
 # script (git config core.hooksPath .githooks). CI runs the same checks, plus
 # the tests and the dist/ check, on every push and pull request.
 #
-# Prettier and ESLint see only the staged files; the other checks are
-# project-wide but take a few seconds. They read the working tree, so stage
-# the full content of a file before committing it.
+# bun fmt and ESLint see only the staged files; the other checks are
+# project-wide but take a few seconds. bun fmt checks the staged content,
+# while ESLint reads the working tree, so stage the full content of a file
+# before committing it.
 set -eu
 
 cd "$(git rev-parse --show-toplevel)"
@@ -20,7 +21,7 @@ staged() {
 }
 
 if [ -n "$(staged | tr -d '\0')" ]; then
-  staged | xargs -0 bun x --bun prettier --check --ignore-unknown
+  run bun fmt --check --staged
 fi
 
 if [ -n "$(staged '*.ts' '*.js' '*.mjs' '*.cjs' | tr -d '\0')" ]; then

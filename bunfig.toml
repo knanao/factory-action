@@ -1,6 +1,6 @@
 # See: https://bun.com/docs/runtime/bunfig
 
 [run]
-# Run package scripts (prettier, eslint, tsc) with Bun even though their
-# shebangs ask for node, so CI needs no Node.js setup.
+# Run package scripts (eslint, tsc) with Bun even though their shebangs ask
+# for node, so CI needs no Node.js setup.
 bun = true

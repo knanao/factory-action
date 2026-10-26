@@ -4,7 +4,6 @@ import { FlatCompat } from '@eslint/eslintrc'
 import js from '@eslint/js'
 import typescriptEslint from '@typescript-eslint/eslint-plugin'
 import tsParser from '@typescript-eslint/parser'
-import prettier from 'eslint-plugin-prettier'
 import globals from 'globals'
 
 const compat = new FlatCompat({
@@ -72,12 +71,10 @@ export default [
   ...compat.extends(
     'eslint:recommended',
     'plugin:@typescript-eslint/eslint-recommended',
-    'plugin:@typescript-eslint/recommended',
-    'plugin:prettier/recommended'
+    'plugin:@typescript-eslint/recommended'
   ),
   {
     plugins: {
-      prettier,
       '@typescript-eslint': typescriptEslint
     },
 
@@ -128,7 +125,6 @@ export default [
       'no-console': 'off',
       'no-shadow': 'off',
       'no-unused-vars': 'off',
-      'prettier/prettier': 'error',
 
       // Size and complexity budgets; AGENTS.md (Conventions) explains them.
       complexity: ['error', 15],

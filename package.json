@@ -33,8 +33,8 @@
     "check:todos": "bun script/check-todos.ts",
     "ci-test": "bun test --coverage",
     "depcruise": "depcruise src __tests__ __fixtures__ script --config .dependency-cruiser.cjs",
-    "format:write": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format:write": "bun fmt",
+    "format:check": "bun fmt --check",
     "jscpd": "jscpd --config .jscpd.json && jscpd --config .jscpd.json --exit-code 1 src",
     "knip": "knip",
     "lint": "eslint .",
@@ -64,12 +64,9 @@
     "@typescript-eslint/parser": "^8.71.2",
     "dependency-cruiser": "^18.6.0",
     "eslint": "^10.13.0",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-prettier": "^5.5.7",
     "globals": "^17.13.0",
     "jscpd": "^5.4.1",
-    "knip": "^6.42.0",
-    "prettier": "^3.8.1",
+    "knip": "^6.43.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2"
   }
 }

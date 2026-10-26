@@ -16,8 +16,9 @@
   "customizations": {
     "vscode": {
       // Extensions match the toolchain CI enforces: ESLint (flat config in
-      // eslint.config.mjs), Prettier (.prettierrc.yml) and GitHub Actions
-      // support for action.yml and the workflows in .github/.
+      // eslint.config.mjs), formatting (.prettierrc.yml; `bun fmt` enforces it
+      // in CI, and the extension's bundled Prettier formats on save) and
+      // GitHub Actions support for action.yml and the workflows in .github/.
       "extensions": [
         "dbaeumer.vscode-eslint",
         "esbenp.prettier-vscode",

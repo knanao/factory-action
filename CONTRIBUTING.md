@@ -42,10 +42,11 @@ keep their external spelling. `AGENTS.md` (Conventions) has the details.
 
 `bun install` runs the `prepare` script (`script/install-hooks.sh`), which
 points `core.hooksPath` at `.githooks/` (skipped when `CI` is set). Before each
-commit, `.githooks/pre-commit` runs Prettier and ESLint on the staged files, the
-typecheck and `bun run check:static` (about five seconds). Run it by hand with
-`.githooks/pre-commit`. Bypass it with `git commit --no-verify` only in an
-emergency: CI runs the same checks, and automated agents must never bypass it.
+commit, `.githooks/pre-commit` runs `bun fmt --check --staged` and ESLint on the
+staged files, the typecheck and `bun run check:static` (about five seconds). Run
+it by hand with `.githooks/pre-commit`. Bypass it with `git commit --no-verify`
+only in an emergency: CI runs the same checks, and automated agents must never
+bypass it.
 
 ### Dev container
 
