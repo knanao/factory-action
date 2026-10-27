@@ -4,3 +4,10 @@
 # Run package scripts (eslint, tsc) with Bun even though their shebangs ask
 # for node, so CI needs no Node.js setup.
 bun = true
+
+[test]
+# Checked per file, and only when coverage is collected (`bun run ci-test`).
+coverageThreshold = { lines = 0.9, functions = 0.9 }
+# Test helpers are not product code; integration helpers run in the test
+# process while the bundle they drive runs in a subprocess.
+coveragePathIgnorePatterns = ["__fixtures__/**", "__tests__/**"]

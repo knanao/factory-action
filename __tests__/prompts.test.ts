@@ -147,6 +147,12 @@ describe('prompts', () => {
     ).toContain('Audit the repo.')
   })
 
+  it('builds no task prompt in cleanup mode', () => {
+    expect(() =>
+      buildPrompt('cleanup', ctx('pull_request', pullRequestEvent('closed')))
+    ).toThrow("mode 'cleanup' does not build a task prompt")
+  })
+
   it('keeps deep-security findings in draft advisories', () => {
     const text = buildPrompt('deep-security', ctx('schedule', {}))
     expect(text).toContain('/deep-security-review on the entire repository')

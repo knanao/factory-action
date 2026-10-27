@@ -3,8 +3,14 @@ import * as core from '../__fixtures__/core.js'
 
 mock.module('@actions/core', () => core)
 
-const { log, minLogLevel, renderRecord, resetLogLevel, setLogLevel } =
-  await import('../src/logger.js')
+const {
+  log,
+  minLogLevel,
+  renderRecord,
+  resetLogLevel,
+  setLogContext,
+  setLogLevel
+} = await import('../src/logger.js')
 
 const LEVEL_ENV = 'FACTORY_ACTION_LOG_LEVEL'
 
@@ -93,6 +99,38 @@ describe('log routing', () => {
       'level=warning event=e.warning k=1'
     )
     expect(core.error).toHaveBeenCalledWith('level=error event=e.error k=1')
+  })
+})
+
+describe('log context', () => {
+  beforeEach(() => {
+    clearEmitters()
+    setLogLevel('debug')
+  })
+
+  afterEach(() => {
+    setLogContext()
+    resetLogLevel()
+  })
+
+  it('appends the context to every record and wins over record fields', () => {
+    setLogContext({ trace_id: 't-1', span_id: 's-1' })
+    log.info('session.created', { session_id: 'sid-1', trace_id: 'spoofed' })
+    log.warning('tracking.write_failed')
+
+    expect(core.info).toHaveBeenCalledWith(
+      'level=info event=session.created session_id=sid-1 trace_id=t-1 span_id=s-1'
+    )
+    expect(core.warning).toHaveBeenCalledWith(
+      'level=warning event=tracking.write_failed trace_id=t-1 span_id=s-1'
+    )
+  })
+
+  it('clears the context when called without fields', () => {
+    setLogContext({ trace_id: 't-1' })
+    setLogContext()
+    log.info('e.info')
+    expect(core.info).toHaveBeenCalledWith('level=info event=e.info')
   })
 })
 

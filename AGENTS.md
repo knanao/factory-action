@@ -33,7 +33,9 @@ built-in Prettier-compatible command. The action itself runs on GitHub's
 - Typecheck: `bun run typecheck`
 - Run all tests: `bun test`
 - Run focused tests: `bun test __tests__/state.test.ts`
-- Tests with coverage (as CI runs them): `bun run ci-test`
+- Tests with coverage (as CI runs them): `bun run ci-test`. It fails when any
+  file under `src/` drops below 90% of lines or functions (`coverageThreshold`
+  in `bunfig.toml`, checked per file); add tests instead of lowering it.
 - Rebuild `dist/`: `bun run package` (or `bun run bundle` to format first)
 - Run the action locally: `bun run local-action`
 
@@ -80,14 +82,22 @@ same checks.
     deleted in cleanup mode.
   - `github.ts` — GitHub API wrapper (reactions, comments, permissions).
   - `inputs.ts` — parses and validates action inputs.
+  - `logger.ts` — structured logfmt records routed to `@actions/core`, with a
+    per-run context (the trace IDs) appended to every record.
+  - `trace.ts` — W3C trace IDs for the run's log records: joins `TRACEPARENT` or
+    starts a trace, plus the OpenTelemetry CI/CD attributes. The context is
+    never sent to an API; no OpenTelemetry SDK and no exporter.
   - `state.ts` — lane-to-session state (session id, last SHA, created computer),
     encoded in the tracking comment.
   - `prompts/` — system rules and per-mode prompt builders (mention, review,
     security, deep-security, qa, wiki, cleanup, custom).
 - `__tests__/` — one `bun:test` file per module.
-- `__fixtures__/` — mocked `@actions/core` and webhook payload helpers; tests
-  load the mock with `mock.module('@actions/core', ...)` before importing the
-  module under test.
+- `__fixtures__/` — mocked `@actions/core`, webhook payload helpers, and
+  builders for inputs and tracking comments; tests load the mock with
+  `mock.module('@actions/core', ...)` before importing the module under test.
+- `docs/runbooks/` — operational procedures (failed or skipped runs, Environment
+  computers, API key rotation, CI failures, release rollback). Keep them in sync
+  when log events, error messages or release steps change.
 - `examples/` — user-facing example workflows (mention, CI review, cleanup,
   Environment cleanup, QA, security audit, wiki).
 - `dist/` — the committed bundle the action runs. Generated; see below.
@@ -114,8 +124,8 @@ same checks.
 - `src/prompts/` is pure text building: it imports only other prompt modules,
   `trigger.ts` and the types of `inputs.ts`; no API clients, orchestration or
   packages.
-- The leaf modules `authz.ts`, `github.ts`, `inputs.ts`, `state.ts` and
-  `trigger.ts` never import `factory.ts`, `compute.ts`, `cleanup.ts`,
+- The leaf modules `authz.ts`, `github.ts`, `inputs.ts`, `state.ts`, `trace.ts`
+  and `trigger.ts` never import `factory.ts`, `compute.ts`, `cleanup.ts`,
   `delegate.ts`, `main.ts`, `index.ts` or `src/prompts/`.
 - Only `github.ts` (and `main.ts`, for the event context) imports
   `@actions/github`, which keeps the GitHub token in one place.

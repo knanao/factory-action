@@ -19,7 +19,7 @@ const DEFAULT_INPUTS: Record<string, string> = {
 }
 
 /** Environment the child must not inherit (it would shadow the test setup). */
-const STRIP_ENV = [/^GITHUB_/, /^INPUT_/, /^RUNNER_/, /proxy/i]
+const STRIP_ENV = [/^GITHUB_/, /^INPUT_/, /^RUNNER_/, /proxy/i, /^TRACEPARENT$/]
 
 let bundleEntry: string | undefined
 const tempDirs: string[] = []
@@ -31,6 +31,8 @@ export interface ActionRunOptions {
   inputs?: Record<string, string>
   githubUrl: string
   factoryUrl: string
+  /** Extra environment for the step, e.g. TRACEPARENT. */
+  env?: Record<string, string>
 }
 
 export interface ActionRun {
@@ -109,7 +111,8 @@ export async function runAction(opts: ActionRunOptions): Promise<ActionRun> {
     GITHUB_WORKSPACE: workDir,
     RUNNER_TEMP: workDir,
     GITHUB_OUTPUT: outputPath,
-    GITHUB_STEP_SUMMARY: summaryPath
+    GITHUB_STEP_SUMMARY: summaryPath,
+    ...opts.env
   })
   const inputs = {
     ...DEFAULT_INPUTS,

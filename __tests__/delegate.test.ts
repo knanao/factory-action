@@ -1,5 +1,6 @@
 import { describe, expect, it, jest, mock } from 'bun:test'
 import * as core from '../__fixtures__/core.js'
+import { inputs, SELF, trackingComment } from '../__fixtures__/inputs.js'
 import {
   issueComment,
   OWNER,
@@ -8,43 +9,12 @@ import {
 } from '../__fixtures__/payloads.js'
 import type { FactoryApi } from '../src/delegate.js'
 import type { GitHubApi } from '../src/github.js'
-import type { Inputs } from '../src/inputs.js'
-import { renderTracking } from '../src/state.js'
 
 mock.module('@actions/core', () => core)
 
 const { computerName } = await import('../src/compute.js')
 const { delegate } = await import('../src/delegate.js')
 const { parseEvent } = await import('../src/trigger.js')
-
-const SELF = 'github-actions[bot]'
-
-function inputs(overrides: Partial<Inputs> = {}): Inputs {
-  return {
-    factoryApiKey: 'fk',
-    computerId: 'comp-1',
-    environmentId: '',
-    provisionTimeoutMs: 300_000,
-    mode: 'mention',
-    prompt: '',
-    lane: 'task',
-    triggerPhrase: '@factory',
-    allowedAssociations: ['OWNER', 'MEMBER', 'COLLABORATOR'],
-    permissionFallback: true,
-    allowedBots: [],
-    commands: ['verify', 'security-review'],
-    cwd: '',
-    model: '',
-    reasoningEffort: '',
-    autonomyLevel: 'high',
-    reuseSession: true,
-    maxComments: 30,
-    messageTimeoutMs: 1000,
-    githubToken: 'ghs',
-    factoryApiUrl: 'https://api.test',
-    ...overrides
-  }
-}
 
 function fakes(
   comments: { id: number; body: string; user: { login: string } }[] = []
@@ -104,14 +74,8 @@ function fakes(
   }
 }
 
-const tracking = (lane: string, sid: string, sha?: string, cid?: string) => ({
-  id: 77,
-  body: renderTracking(
-    { v: 1, lane, sid, sha, cid },
-    { sessionUrl: 'u', reused: false, runUrl: 'r' }
-  ),
-  user: { login: SELF }
-})
+const tracking = (lane: string, sid: string, sha?: string, cid?: string) =>
+  trackingComment({ lane, sid, sha, cid })
 
 describe('delegate', () => {
   it('creates a session for a new mention and records it', async () => {

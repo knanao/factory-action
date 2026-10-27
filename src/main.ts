@@ -4,10 +4,14 @@ import { delegate } from './delegate.js'
 import { FactoryClient } from './factory.js'
 import { createGitHubApi } from './github.js'
 import { getInputs } from './inputs.js'
-import { log } from './logger.js'
+import { log, setLogContext } from './logger.js'
+import { cicdAttributes, startTrace, traceLogFields } from './trace.js'
 import { parseEvent } from './trigger.js'
 
 export async function run(): Promise<void> {
+  const trace = startTrace()
+  setLogContext(traceLogFields(trace))
+  core.setOutput('trace-id', trace.traceId)
   try {
     const inputs = getInputs()
     const { owner, repo } = context.repo
@@ -17,7 +21,9 @@ export async function run(): Promise<void> {
       repo: `${owner}/${repo}`,
       github_event: context.eventName,
       mode: inputs.mode,
-      lane: inputs.lane
+      lane: inputs.lane,
+      trace_inherited: trace.inherited,
+      ...cicdAttributes()
     })
 
     const outcome = await delegate(inputs, trigger, {
@@ -44,7 +50,8 @@ export async function run(): Promise<void> {
             { data: 'Lane', header: true },
             { data: 'Session', header: true },
             { data: 'Computer', header: true },
-            { data: 'Reused', header: true }
+            { data: 'Reused', header: true },
+            { data: 'Trace ID', header: true }
           ],
           [
             inputs.mode === 'cleanup' ? 'cleanup' : inputs.lane,
@@ -52,7 +59,8 @@ export async function run(): Promise<void> {
               ? `<a href="${outcome.sessionUrl}">${outcome.sessionId}</a>`
               : (outcome.sessionId ?? ''),
             outcome.computerId ?? '',
-            String(outcome.reused)
+            String(outcome.reused),
+            trace.traceId
           ]
         ])
         .write()

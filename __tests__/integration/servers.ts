@@ -59,7 +59,8 @@ class RecordingServer {
           headers: {
             authorization: req.headers.get('authorization') ?? '',
             accept: req.headers.get('accept') ?? '',
-            'content-type': req.headers.get('content-type') ?? ''
+            'content-type': req.headers.get('content-type') ?? '',
+            traceparent: req.headers.get('traceparent') ?? ''
           },
           body
         })

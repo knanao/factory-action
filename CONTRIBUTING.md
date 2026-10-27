@@ -91,7 +91,11 @@ The full scenario list and what to check is in
   commit it with every source change (`bun run all` does this). The **Check
   Transpiled JavaScript** workflow fails if `dist/` is stale.
 - **Add tests for behavior changes.** Tests run with `bun test` and live in
-  `__tests__/`, with webhook payload helpers in `__fixtures__/`.
+  `__tests__/`, with webhook payload helpers in `__fixtures__/`. CI runs
+  `bun run ci-test`, which fails when any file under `src/` has less than 90%
+  line or function coverage.
+- **Keep the runbooks in sync.** `docs/runbooks/` quotes log events and error
+  messages; update it when you change them.
 - **Keep the docs in sync.** When you add or change an input, output or mode,
   update both `action.yml` and the tables in `README.md`.
 - **Commit messages** follow the Conventional Commits style used in the history,

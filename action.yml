@@ -129,6 +129,10 @@ outputs:
     description:
       Empty, or why the event was skipped (unauthorized, no-trigger, fork, bot,
       draft).
+  trace-id:
+    description: >-
+      W3C trace ID of the run: taken from TRACEPARENT when the step receives
+      one, otherwise new. Every log record of the run carries it.
 
 runs:
   using: node24

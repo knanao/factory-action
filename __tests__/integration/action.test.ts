@@ -26,6 +26,7 @@ import { FactoryStub, GitHubStub, type RecordedRequest } from './servers.js'
 import { buildAction, cleanupRunner, runAction } from './runner.js'
 
 const MARKER_RE = /<!-- factory-action:state (\{.*?\}) -->/
+const TRACE_ID = expect.stringMatching(/^[0-9a-f]{32}$/)
 
 function trackingState(body: string | undefined): Record<string, unknown> {
   const match = MARKER_RE.exec(body ?? '')
@@ -106,7 +107,8 @@ describe('integration: the bundled action', () => {
       'session-id': 'sess-1',
       'session-url': 'https://app.factory.ai/sessions/sess-1',
       reused: 'false',
-      'computer-id': 'comp-1'
+      'computer-id': 'comp-1',
+      'trace-id': TRACE_ID
     })
     expect(run.summary).toContain('<h3>Factory Droid</h3>')
     expect(run.summary).toContain('https://app.factory.ai/sessions/sess-1')
@@ -173,9 +175,30 @@ describe('integration: the bundled action', () => {
       sid: 'sess-1'
     })
 
-    // Every Factory call carries the API key.
     for (const req of factory.requests) {
       expect(req.headers.authorization).toBe('Bearer fk-test')
+    }
+    expect(run.stdout).toContain(`trace_id=${run.outputs['trace-id']}`)
+  }, 30_000)
+
+  it('joins the trace passed in TRACEPARENT', async () => {
+    const traceparent =
+      '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'
+    const run = await runAction({
+      ...mention('@factory fix it'),
+      env: { TRACEPARENT: traceparent }
+    })
+
+    expect(run.exitCode).toBe(0)
+    expect(run.outputs['trace-id']).toBe('4bf92f3577b34da6a3ce929d0e0e4736')
+    expect(run.stdout).toContain(
+      'trace_id=4bf92f3577b34da6a3ce929d0e0e4736 span_id=00f067aa0ba902b7'
+    )
+    expect(run.stdout).toContain('cicd.pipeline.run.id=12345')
+    // The trace context never leaves the run.
+    expect(factory.requests.length).toBeGreaterThan(0)
+    for (const req of [...factory.requests, ...github.requests]) {
+      expect(req.headers.traceparent).toBe('')
     }
   }, 30_000)
 
@@ -219,7 +242,8 @@ describe('integration: the bundled action', () => {
       'session-id': 'sess-1',
       'session-url': 'https://app.factory.ai/sessions/sess-1',
       reused: 'false',
-      'computer-id': 'comp-1'
+      'computer-id': 'comp-1',
+      'trace-id': TRACE_ID
     })
 
     const text = factory.messages.get('sess-1')![0]
@@ -305,7 +329,8 @@ describe('integration: the bundled action', () => {
       'session-id': '',
       'session-url': '',
       reused: 'false',
-      'computer-id': ''
+      'computer-id': '',
+      'trace-id': TRACE_ID
     })
 
     // The permission check is the only API call: no reaction, no comment,
@@ -331,8 +356,8 @@ describe('integration: the bundled action', () => {
     expect(run.stdout).toContain(
       '::error::Factory API 500 Internal Server Error: computer offline'
     )
-    // Nothing was delegated, so no outputs or summary were written.
-    expect(Object.keys(run.outputs)).toHaveLength(0)
+    // Nothing was delegated: only the trace ID, written before any work.
+    expect(run.outputs).toEqual({ 'trace-id': TRACE_ID })
     expect(run.summary).toBe('')
   }, 30_000)
 
@@ -475,7 +500,8 @@ describe('integration: the bundled action', () => {
       'session-id': '',
       'session-url': '',
       reused: 'false',
-      'computer-id': ''
+      'computer-id': '',
+      'trace-id': TRACE_ID
     })
     expect(github.requests).toHaveLength(0)
     expect(factory.requests).toHaveLength(0)

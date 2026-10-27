@@ -54,6 +54,10 @@ review or issue body), the comment or review ID, and for review comments the
 file path, line and diff hunk. For pull requests it also reads the base and head
 branch names and SHAs and the head repository name.
 
+From the runner environment (`src/trace.ts`): `TRACEPARENT` when the workflow
+sets it, and the workflow, job and run IDs, the repository URL and the commit
+SHA from the default `GITHUB_*` variables.
+
 Through the GitHub API, with `github-token` (`src/github.ts`): the triggering
 user's collaborator permission when `permission-fallback` applies, the comments
 on the issue or PR (only to find the action's own tracking comments; other
@@ -91,7 +95,7 @@ sees every comment on the thread, using the computer's own GitHub credentials.
   action created, Environment mode). No comment text, prompt or user login is
   stored.
 - **Step outputs and job summary** (`src/main.ts`): session ID and URL, computer
-  ID, lane, whether the session was reused, and the skip reason.
+  ID, lane, whether the session was reused, the skip reason and the trace ID.
 
 ### What it logs
 
@@ -99,11 +103,12 @@ The step log (`src/delegate.ts`, `src/cleanup.ts`, `src/compute.ts`) contains
 the triggering user's login with the authorization result and reason
 (`author_association`, and the permission level when the fallback ran; denials
 are a notice annotation on the run), session IDs, computer names and IDs, lane
-names, and error messages returned by the GitHub and Factory APIs. It does not
-log comment bodies, PR text, diffs or the message sent to Droid.
-`factory-api-key` is registered with `core.setSecret`, so the runner masks it;
-values passed from `secrets.*` and `github.token` are masked by the runner as
-well.
+names, and error messages returned by the GitHub and Factory APIs. Every record
+carries the run's `trace_id` and `span_id`, and the first one adds the workflow
+name, run ID and URL, job name, repository URL and commit SHA. It does not log
+comment bodies, PR text, diffs or the message sent to Droid. `factory-api-key`
+is registered with `core.setSecret`, so the runner masks it; values passed from
+`secrets.*` and `github.token` are masked by the runner as well.
 
 ### Retention and deletion
 

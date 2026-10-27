@@ -176,6 +176,7 @@ This is enforced through the session's system prompt and needs the Droid Control
 | `computer-id` | Computer used by the session; in Environment cleanup mode, computers deleted (comma separated) |
 | `reused` | `true` if the message was a follow-up |
 | `skipped` | `''`, or `unauthorized` \| `no-trigger` \| `fork` \| `bot` \| `draft` |
+| `trace-id` | W3C trace ID of the run, shared by its log records and Factory API requests (see [Tracing](#tracing)) |
 
 ## Logging
 
@@ -190,6 +191,15 @@ Every record the action writes to the run log is one structured line in logfmt, 
 | `error` | The run failed, with the stack | Error annotation |
 
 `FACTORY_ACTION_LOG_LEVEL` (`debug` | `info` | `notice` | `warning` | `error`) filters records; by default everything from `info` up is emitted. GitHub's own `ACTIONS_STEP_DEBUG` flag also turns on `debug`.
+
+### Tracing
+
+Tracing stays inside the workflow run. The action uses [W3C Trace Context](https://www.w3.org/TR/trace-context/) IDs and OpenTelemetry's conventions to tie its log records together, without bundling an OpenTelemetry SDK, exporting anything, or sending trace headers to the Factory or GitHub API:
+
+- **Trace context.** If the step's environment has `TRACEPARENT`, as defined by OpenTelemetry's [environment variable carrier](https://opentelemetry.io/docs/specs/otel/context/env-carriers/), the run joins that trace. Otherwise it starts a new one.
+- **Correlation.** Every log record ends with `trace_id=... span_id=...`, the `run.started` record adds the OpenTelemetry [CI/CD](https://opentelemetry.io/docs/specs/semconv/resource/cicd/) attributes (`cicd.pipeline.name`, `cicd.pipeline.run.id`, `cicd.pipeline.run.url.full`, `cicd.pipeline.task.name`, `vcs.repository.url.full`, `vcs.ref.head.revision`), and the `trace-id` output and job summary show the trace ID.
+
+To see the run as spans in an OpenTelemetry backend, export the workflow run after it completes with a `workflow_run` exporter such as [otel-cicd-action](https://github.com/dash0hq/otel-cicd-action), and correlate it with the action's records through `cicd.pipeline.run.id`. A workflow that already traces its jobs can pass the job's span context to the step in `TRACEPARENT`.
 
 ## Computer setup
 
@@ -271,9 +281,13 @@ To run the action against a local (simulated) event, copy [`.env.example`](./.en
 
 To run the action end to end offline, against a local mock of the Factory Sessions API and the GitHub REST API, use `bun run qa:mock` and `bun run qa:run <event-file>`. See [`.factory/skills/qa/SKILL.md`](./.factory/skills/qa/SKILL.md) for the scenarios and what to check.
 
-Unit tests live in `__tests__/` and mock the GitHub and Factory boundaries. `__tests__/integration/` goes further: it builds the bundle, runs it as a subprocess against localhost stubs of both APIs and checks the full path a runner takes (inputs, event parsing, authorization, session reuse, prompts, tracking state and outputs). Run it alone with `bun run test:integration`.
+Unit tests live in `__tests__/` and mock the GitHub and Factory boundaries. `bun run ci-test` enforces at least 90% line and function coverage for every file under `src/`. `__tests__/integration/` goes further: it builds the bundle, runs it as a subprocess against localhost stubs of both APIs and checks the full path a runner takes (inputs, event parsing, authorization, session reuse, prompts, tracking state and outputs). Run it alone with `bun run test:integration`.
 
 `dist/` is committed. The **Check Transpiled JavaScript** workflow fails if it is stale. Releases follow the [typescript-action](https://github.com/actions/typescript-action) flow: `script/release` tags `vX.Y.Z` and updates the corresponding major tag (for `v0.1.0`, that is `v0`).
+
+## Runbooks
+
+Procedures for failed or skipped runs, Environment computers, API key rotation, repository CI failures and release rollback are in [docs/runbooks/](./docs/runbooks/README.md).
 
 ## Contributing
 

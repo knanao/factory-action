@@ -22877,6 +22877,10 @@ var SEVERITY = {
 };
 var LEVEL_ENV = "FACTORY_ACTION_LOG_LEVEL";
 var levelOverride;
+var context3 = {};
+function setLogContext(fields = {}) {
+  context3 = { ...fields };
+}
 function minLogLevel() {
   if (levelOverride)
     return levelOverride;
@@ -22903,7 +22907,7 @@ function renderRecord(level, event, fields = {}) {
 function emit(level, event, fields) {
   if (SEVERITY[level] < SEVERITY[minLogLevel()])
     return;
-  const line = renderRecord(level, event, fields);
+  const line = renderRecord(level, event, { ...fields, ...context3 });
   if (level === "debug")
     debug(line);
   else if (level === "notice")
@@ -24111,8 +24115,57 @@ function oneOf(name, allowed, value) {
   return value;
 }
 
+// src/trace.ts
+import { randomBytes } from "node:crypto";
+var TRACEPARENT = /^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})(-.*)?$/;
+function startTrace(env = process.env) {
+  const parent = parseTraceparent(env.TRACEPARENT);
+  if (parent)
+    return { ...parent, inherited: true };
+  return { traceId: randomHex(16), spanId: randomHex(8), inherited: false };
+}
+function parseTraceparent(value) {
+  const m = TRACEPARENT.exec(value?.trim().toLowerCase() ?? "");
+  if (!m)
+    return;
+  const [, version, traceId, spanId, , rest] = m;
+  if (version === "ff" || version === "00" && rest !== undefined) {
+    return;
+  }
+  if (/^0+$/.test(traceId) || /^0+$/.test(spanId))
+    return;
+  return { traceId, spanId };
+}
+function traceLogFields(ctx) {
+  return { trace_id: ctx.traceId, span_id: ctx.spanId };
+}
+function cicdAttributes(env = process.env) {
+  const server = env.GITHUB_SERVER_URL;
+  const repo = env.GITHUB_REPOSITORY;
+  const runId = env.GITHUB_RUN_ID;
+  const repoUrl = server && repo ? `${server}/${repo}` : undefined;
+  return {
+    "cicd.pipeline.name": env.GITHUB_WORKFLOW,
+    "cicd.pipeline.run.id": runId,
+    "cicd.pipeline.run.url.full": repoUrl && runId ? `${repoUrl}/actions/runs/${runId}/attempts/${env.GITHUB_RUN_ATTEMPT ?? "1"}` : undefined,
+    "cicd.pipeline.task.name": env.GITHUB_JOB,
+    "vcs.repository.url.full": repoUrl,
+    "vcs.ref.head.revision": env.GITHUB_SHA
+  };
+}
+function randomHex(bytes) {
+  for (;; ) {
+    const hex = randomBytes(bytes).toString("hex");
+    if (!/^0+$/.test(hex))
+      return hex;
+  }
+}
+
 // src/main.ts
 async function run() {
+  const trace = startTrace();
+  setLogContext(traceLogFields(trace));
+  setOutput("trace-id", trace.traceId);
   try {
     const inputs = getInputs();
     const { owner, repo } = context2.repo;
@@ -24121,7 +24174,9 @@ async function run() {
       repo: `${owner}/${repo}`,
       github_event: context2.eventName,
       mode: inputs.mode,
-      lane: inputs.lane
+      lane: inputs.lane,
+      trace_inherited: trace.inherited,
+      ...cicdAttributes()
     });
     const outcome = await delegate(inputs, trigger, {
       github: createGitHubApi(inputs.githubToken, owner, repo),
@@ -24143,13 +24198,15 @@ async function run() {
           { data: "Lane", header: true },
           { data: "Session", header: true },
           { data: "Computer", header: true },
-          { data: "Reused", header: true }
+          { data: "Reused", header: true },
+          { data: "Trace ID", header: true }
         ],
         [
           inputs.mode === "cleanup" ? "cleanup" : inputs.lane,
           outcome.sessionUrl ? `<a href="${outcome.sessionUrl}">${outcome.sessionId}</a>` : outcome.sessionId ?? "",
           outcome.computerId ?? "",
-          String(outcome.reused)
+          String(outcome.reused),
+          trace.traceId
         ]
       ]).write();
     }
@@ -24165,5 +24222,5 @@ async function run() {
 // src/index.ts
 run();
 
-//# debugId=E7AFCF0D28D882F864756E2164756E21
+//# debugId=CE71785FBB4ACB3C64756E2164756E21
 //# sourceMappingURL=index.js.map

@@ -26,6 +26,7 @@ const SEVERITY: Record<LogLevel, number> = {
 const LEVEL_ENV = 'FACTORY_ACTION_LOG_LEVEL'
 
 let levelOverride: LogLevel | undefined
+let context: LogFields = {}
 
 /** Sets the minimum emitted level, overriding the environment (test hook). */
 export function setLogLevel(level: LogLevel): void {
@@ -35,6 +36,14 @@ export function setLogLevel(level: LogLevel): void {
 /** Clears an explicit override; the level falls back to the environment. */
 export function resetLogLevel(): void {
   levelOverride = undefined
+}
+
+/**
+ * Sets fields appended to every record, such as the run's `trace_id` and
+ * `span_id`. Replaces any earlier context; call with no argument to clear it.
+ */
+export function setLogContext(fields: LogFields = {}): void {
+  context = { ...fields }
 }
 
 /** The minimum level currently emitted. */
@@ -70,7 +79,7 @@ export function renderRecord(
 
 function emit(level: LogLevel, event: string, fields?: LogFields): void {
   if (SEVERITY[level] < SEVERITY[minLogLevel()]) return
-  const line = renderRecord(level, event, fields)
+  const line = renderRecord(level, event, { ...fields, ...context })
   if (level === 'debug') core.debug(line)
   else if (level === 'notice') core.notice(line)
   else if (level === 'warning') core.warning(line)

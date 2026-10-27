@@ -10,6 +10,7 @@ import {
 import {
   issueComment,
   OWNER,
+  pullRequest,
   pullRequestEvent,
   REPO,
   reviewComment
@@ -67,6 +68,52 @@ describe('parseEvent', () => {
       headRepo: 'acme/widgets'
     })
     expect(t.reaction).toEqual({ kind: 'review-comment', id: 2002 })
+  })
+
+  it('takes the review body as the text of a submitted review', () => {
+    const review = (body: string | null) => ({
+      action: 'submitted',
+      pull_request: pullRequest(),
+      review: {
+        body,
+        user: { login: 'bob', type: 'User' },
+        author_association: 'COLLABORATOR'
+      }
+    })
+    const t = parse('pull_request_review', review('@factory address this'))
+    expect(t).toMatchObject({
+      number: 7,
+      isPR: true,
+      text: '@factory address this',
+      author: { login: 'bob', association: 'COLLABORATOR' },
+      pr: { headSha: 'head222' }
+    })
+    expect(t.reaction).toBeUndefined()
+    expect(parse('pull_request_review', review(null)).text).toBe('')
+  })
+
+  it('takes the issue body as the text of an opened issue', () => {
+    const issue = (body: string | null) => ({
+      action: 'opened',
+      issue: {
+        number: 9,
+        html_url: 'https://github.com/acme/widgets/issues/9',
+        title: 'Add dark mode',
+        body,
+        user: { login: 'alice', type: 'User' },
+        author_association: 'OWNER'
+      }
+    })
+    expect(parse('issues', issue('@factory build it'))).toMatchObject({
+      number: 9,
+      isPR: false,
+      title: 'Add dark mode',
+      body: '@factory build it',
+      text: '@factory build it',
+      author: { login: 'alice', association: 'OWNER' },
+      reaction: { kind: 'issue', id: 9 }
+    })
+    expect(parse('issues', issue(null))).toMatchObject({ body: '', text: '' })
   })
 
   it('has no text for pull_request events', () => {

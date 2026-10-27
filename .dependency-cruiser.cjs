@@ -43,9 +43,10 @@ module.exports = {
       name: 'leaf-modules-stay-leaves',
       severity: 'error',
       comment:
-        'Event parsing, authorization, inputs, state and the GitHub wrapper ' +
+        'Event parsing, authorization, inputs, state, trace context and the ' +
+        'GitHub wrapper ' +
         'must not reach the Factory client, compute, prompts or orchestration.',
-      from: { path: '^src/(authz|github|inputs|state|trigger)\\.ts$' },
+      from: { path: '^src/(authz|github|inputs|state|trace|trigger)\\.ts$' },
       to: {
         path: '^src/(cleanup|compute|delegate|factory|index|main)\\.ts$|^src/prompts/'
       }
