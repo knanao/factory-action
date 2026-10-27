@@ -39,7 +39,7 @@ built-in Prettier-compatible command. The action itself runs on GitHub's
 - Rebuild `dist/`: `bun run package` (or `bun run bundle` to format first)
 - Run the action locally: `bun run local-action`
 
-Static checks (`bun run check:static` runs the first five):
+Static checks (`bun run check:static` runs the first six):
 
 - Dead code, unused exports and unused or unlisted dependencies: `bun run knip`
   (config: `knip.jsonc`)
@@ -48,6 +48,9 @@ Static checks (`bun run check:static` runs the first five):
 - Duplicate code: `bun run jscpd` (config: `.jscpd.json`)
 - Tracked file sizes: `bun run check:size` (`script/check-file-size.ts`)
 - Tech-debt markers: `bun run check:todos` (`script/check-todos.ts`)
+- This file's references: `bun run check:agents-md`
+  (`script/check-agents-md.ts`): every path and `bun run` script named here
+  exists, and every module under `src/` is in the project layout
 - Bundle size budget and heaviest packages: `bun run check:bundle`
   (`script/check-bundle-size.ts`; run `bun run package` first)
 
@@ -64,8 +67,9 @@ same checks.
 
 ## Project layout
 
-- `action.yml` — the action's public contract (inputs, outputs, branding). Keep
-  it in sync with `README.md` when inputs, outputs, or modes change.
+- `action.yml` — the action's public contract (inputs, outputs, branding) and
+  the only reference for inputs and outputs; `README.md` links to it instead of
+  repeating them.
 - `src/` — TypeScript sources, entry chain `index.ts` → `main.ts`:
   - `trigger.ts` — parses webhook events into a `Trigger`; prechecks
     (no-trigger, fork, bot, draft) and slash-command detection.
@@ -102,8 +106,8 @@ same checks.
   Environment cleanup, QA, security audit, wiki).
 - `dist/` — the committed bundle the action runs. Generated; see below.
 - `script/check-*.ts` — repository checks run with Bun (file sizes, tech-debt
-  markers, bundle budget); `script/lib/` holds their shared helpers.
-  `script/install-hooks.sh` enables the Git hooks.
+  markers, bundle budget, AGENTS.md references); `script/lib/` holds their
+  shared helpers. `script/install-hooks.sh` enables the Git hooks.
 - `script/qa/` — the offline QA harness (mock APIs, sample events and the
   Bun-safe `local-action` wrapper).
 - `.githooks/` — the checked-in pre-commit hook.
@@ -155,8 +159,10 @@ fails CI when `dist/` does not match the sources.
   `CONTRIBUTING.md` (Dependency updates).
 - Add tests for behavior changes; they live in `__tests__/` and use the fixtures
   in `__fixtures__/`.
-- Keep docs in sync: when adding or changing an input, output, or mode, update
-  both `action.yml` and the tables in `README.md`.
+- Keep docs in sync: inputs and outputs are documented only in `action.yml`.
+  When adding or changing a mode, also update the Usage section of `README.md`.
+  `bun run check:agents-md` fails when `AGENTS.md` names a missing file or
+  script, or leaves out a module under `src/`.
 - Formatting is enforced by `bun fmt`, Bun's built-in Prettier-compatible
   formatter (no semicolons, single quotes, 80 columns, hard-wrapped prose; it
   reads `.prettierrc.yml`). CI runs `bun run format:check` and the pre-commit
@@ -225,7 +231,7 @@ Before calling work finished, run:
 
 1. `bun run format:check && bun run lint && bun run typecheck`
 2. `bun run check:static` (knip, dependency-cruiser, jscpd, file sizes,
-   tech-debt markers)
+   tech-debt markers, AGENTS.md references)
 3. `bun test` (plus the focused test file while iterating)
 4. `bun run package` when `src/` changed, then `bun run check:bundle`, and
    commit the rebuilt `dist/` in the same change.

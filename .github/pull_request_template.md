@@ -38,7 +38,7 @@ run). Redact tokens, API keys and personal data from any logs you paste.
 - [ ] `bun test` passes, and behavior changes come with tests in `__tests__/`
 - [ ] When `src/` changed: `bun run package` was run and the rebuilt `dist/` is
       committed in this pull request (`bun run check:bundle` passes)
-- [ ] When an input, output or mode changed: `action.yml` and the tables in
-      `README.md` are updated together
+- [ ] When an input, output or mode changed: `action.yml` is updated (and the
+      Usage section of `README.md` for a mode)
 - [ ] No secrets, tokens or real personal data in code, fixtures, logs or
       screenshots

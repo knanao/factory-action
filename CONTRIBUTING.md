@@ -17,21 +17,22 @@ bun run check  # every check, without rewriting files or running tests
 
 ### Checks
 
-| Command                | What it enforces                                                                                                                 |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `bun run lint`         | ESLint, including naming conventions, `complexity` ≤ 15, `max-depth` ≤ 4, `max-params` ≤ 4 and `max-lines` ≤ 400 (700 for tests) |
-| `bun run knip`         | No unused files, exports or dependencies, and no unlisted ones (`knip.jsonc`)                                                    |
-| `bun run depcruise`    | Module boundaries and no circular imports (`.dependency-cruiser.cjs`, rules listed in `AGENTS.md`)                               |
-| `bun run jscpd`        | No duplicated code in `src/`, under 1.5% duplication overall (`.jscpd.json`)                                                     |
-| `bun run check:size`   | Tracked files stay under 100 KiB (`bun.lock`: 256 KiB)                                                                           |
-| `bun run check:todos`  | TODO, FIXME, HACK and XXX markers link to an issue, as in `TODO(#123): ...`                                                      |
-| `bun run check:bundle` | `dist/index.js` stays under 1,100,000 bytes; lists the heaviest packages (run `bun run package` first)                           |
+| Command                   | What it enforces                                                                                                                 |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `bun run lint`            | ESLint, including naming conventions, `complexity` ≤ 15, `max-depth` ≤ 4, `max-params` ≤ 4 and `max-lines` ≤ 400 (700 for tests) |
+| `bun run knip`            | No unused files, exports or dependencies, and no unlisted ones (`knip.jsonc`)                                                    |
+| `bun run depcruise`       | Module boundaries and no circular imports (`.dependency-cruiser.cjs`, rules listed in `AGENTS.md`)                               |
+| `bun run jscpd`           | No duplicated code in `src/`, under 1.5% duplication overall (`.jscpd.json`)                                                     |
+| `bun run check:size`      | Tracked files stay under 100 KiB (`bun.lock`: 256 KiB)                                                                           |
+| `bun run check:todos`     | TODO, FIXME, HACK and XXX markers link to an issue, as in `TODO(#123): ...`                                                      |
+| `bun run check:agents-md` | Every path and `bun run` script `AGENTS.md` names exists, and every module under `src/` is in its project layout                 |
+| `bun run check:bundle`    | `dist/index.js` stays under 1,100,000 bytes; lists the heaviest packages (run `bun run package` first)                           |
 
-`bun run check:static` runs knip, dependency-cruiser, jscpd and the size and
-marker checks together. `knip`, `dependency-cruiser` and `jscpd` are the only
-devDependencies added for these checks: ESLint and TypeScript cannot find unused
-files and dependencies, enforce import boundaries across modules, or detect
-copy-paste.
+`bun run check:static` runs knip, dependency-cruiser, jscpd and the size, marker
+and `AGENTS.md` checks together. `knip`, `dependency-cruiser` and `jscpd` are
+the only devDependencies added for these checks: ESLint and TypeScript cannot
+find unused files and dependencies, enforce import boundaries across modules, or
+detect copy-paste.
 
 Names follow the codebase: `camelCase` for variables, functions and properties,
 `PascalCase` for types and classes, `UPPER_CASE` for module-level constants.
@@ -96,8 +97,11 @@ The full scenario list and what to check is in
   line or function coverage.
 - **Keep the runbooks in sync.** `docs/runbooks/` quotes log events and error
   messages; update it when you change them.
-- **Keep the docs in sync.** When you add or change an input, output or mode,
-  update both `action.yml` and the tables in `README.md`.
+- **Keep the docs in sync.** Inputs and outputs are documented only in
+  `action.yml`; the README links to it. When you add or change a mode, also
+  update the Usage section of `README.md`. When you add, move or remove a file,
+  script or module that `AGENTS.md` names, update it too:
+  `bun run check:agents-md` (part of `bun run check:static`) fails otherwise.
 - **Commit messages** follow the Conventional Commits style used in the history,
   e.g. `fix: review full PR diff after interrupted CI sessions`.
 - **Releases** are cut by the maintainer from the Actions tab: **Release** >

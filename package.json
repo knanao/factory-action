@@ -26,9 +26,10 @@
   "scripts": {
     "bundle": "bun run format:write && bun run package",
     "check": "bun run format:check && bun run lint && bun run typecheck && bun run check:static && bun run check:bundle",
+    "check:agents-md": "bun script/check-agents-md.ts",
     "check:bundle": "bun script/check-bundle-size.ts",
     "check:size": "bun script/check-file-size.ts",
-    "check:static": "bun run knip && bun run depcruise && bun run jscpd && bun run check:size && bun run check:todos",
+    "check:static": "bun run knip && bun run depcruise && bun run jscpd && bun run check:size && bun run check:todos && bun run check:agents-md",
     "check:todos": "bun script/check-todos.ts",
     "ci-test": "bun test --coverage",
     "depcruise": "depcruise src __tests__ __fixtures__ script --config .dependency-cruiser.cjs",

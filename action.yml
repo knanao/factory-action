@@ -14,13 +14,13 @@ inputs:
     required: true
   computer-id:
     description:
-      ID of the existing Droid Computer (mutually exclusive with
-      environment-id).
+      ID of an existing Droid Computer to run the session on. Set exactly one of
+      computer-id and environment-id.
     required: false
   environment-id:
     description:
       Factory Environment used to create one unlisted computer per issue/PR and
-      lane (mutually exclusive with computer-id).
+      lane. Set exactly one of computer-id and environment-id.
     required: false
   provision-timeout-sec:
     description:
@@ -85,7 +85,10 @@ inputs:
     required: false
     default: ''
   autonomy-level:
-    description: off | low | medium | high
+    description:
+      off | low | medium | high. Below high, commands Droid rates as high-risk
+      (such as git push) wait for an approval that never comes; see Security in
+      the README.
     required: false
     default: high
   reuse-session:

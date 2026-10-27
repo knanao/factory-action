@@ -141,42 +141,11 @@ When Droid opens or updates a PR that changes what people see rendered (app scre
 
 This is enforced through the session's system prompt and needs the Droid Control tools on the computer, see [Computer setup](#computer-setup).
 
-## Inputs
+## Inputs and outputs
 
-| Input | Default | Description |
-| --- | --- | --- |
-| `factory-api-key` | **required** | Factory API key (service account recommended) |
-| `computer-id` | — | Existing Droid Computer to run the session on. Set exactly one of this or `environment-id` |
-| `environment-id` | — | Factory Environment used to create one unlisted computer per issue/PR and lane. Set exactly one of this or `computer-id` |
-| `provision-timeout-sec` | `300` | Maximum time to wait for an Environment computer to become active |
-| `mode` | `mention` | `mention` \| `review` \| `security` \| `deep-security` \| `qa` \| `wiki` \| `custom` \| `cleanup` |
-| `prompt` | `''` | Template for `custom` (required there); extra instructions for the other modes |
-| `lane` | mode (`task` for mention) | Session reuse key per issue/PR |
-| `trigger-phrase` | `@factory` | Mention phrase |
-| `allowed-associations` | `OWNER,MEMBER,COLLABORATOR` | `author_association` values allowed to trigger |
-| `permission-fallback` | `true` | If the association is not allowed, also allow users with write/admin permission (covers private org members) |
-| `allowed-bots` | `''` | Bot logins allowed to trigger |
-| `commands` | `security-review,deep-security-review,qa,wiki,verify,qa-test,demo` | Names that `@factory <name>` runs as `/<name>` |
-| `cwd` | auto | Repository path on the computer. Auto-detected from the computer's cloned repositories |
-| `model` | Factory default | Model for new sessions |
-| `reasoning-effort` | Factory default | Reasoning effort for new sessions |
-| `autonomy-level` | `high` | `off` \| `low` \| `medium` \| `high`. Unattended work needs git push and `gh`, see [Security](#security) |
-| `reuse-session` | `true` | Follow up on the lane's existing session |
-| `max-comments` | `30` | Max inline comments per review |
-| `message-timeout-ms` | `15000` | Timeout for sending the message; a timeout is treated as accepted |
-| `github-token` | `${{ github.token }}` | Used only for the reaction and the tracking comment. Never passed to Droid |
-| `factory-api-url` | `https://api.factory.ai` | API base URL |
+[`action.yml`](./action.yml) is the reference for every input and output: its name, whether it is required, its default and what it does. This README does not repeat them.
 
-## Outputs
-
-| Output | Description |
-| --- | --- |
-| `session-id` | Session the message was sent to (in `cleanup` mode, the sessions asked to clean up, comma separated) |
-| `session-url` | Link to the session in the Factory app |
-| `computer-id` | Computer used by the session; in Environment cleanup mode, computers deleted (comma separated) |
-| `reused` | `true` if the message was a follow-up |
-| `skipped` | `''`, or `unauthorized` \| `no-trigger` \| `fork` \| `bot` \| `draft` |
-| `trace-id` | W3C trace ID of the run, shared by its log records and Factory API requests (see [Tracing](#tracing)) |
+Most workflows set only `factory-api-key` and exactly one of `computer-id` or `environment-id`. [Usage](#usage) and [examples/](./examples) show the other inputs in context.
 
 ## Logging
 
