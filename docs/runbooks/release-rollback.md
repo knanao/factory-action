@@ -1,8 +1,8 @@
 # Bad release rollback
 
 Users pin `knanao/factory-action@v0` (the major tag) or an exact `vX.Y.Z` tag.
-`script/release` moves the major tag to each new release, so a bad release
-reaches every `@v0` user at once.
+The **Release** workflow (`.github/workflows/release.yml`) moves the major tag
+to each new release, so a bad release reaches every `@v0` user at once.
 
 ## Roll back the major tag
 
@@ -11,8 +11,9 @@ reaches every `@v0` user at once.
    rewrites a published tag, so announce it):
 
    ```sh
-   git tag --force --annotate v0 v0.1.0^{} --message "Roll back v0 to v0.1.0"
-   git push origin v0 --force
+   git fetch --tags --force origin
+   git tag --force v0 'v0.1.0^{commit}'
+   git push origin refs/tags/v0 --force
    ```
 
 3. Mark the bad GitHub release as a pre-release or edit its notes to say it was
@@ -21,10 +22,21 @@ reaches every `@v0` user at once.
 
 ## Fix forward
 
-1. Fix the problem on a branch, merge it through a PR and cut a new patch
-   release with `script/release`, which moves `v0` to it.
-2. If the bad release changed state stored in tracking comments, check that the
+1. Fix the problem on a branch and merge it through a PR.
+2. Wait for the required checks on the merge commit in `main`, then run
+   **Release** > **Run workflow** with the next patch version. It moves `v0` to
+   the new release.
+3. If the bad release changed state stored in tracking comments, check that the
    fixed version still reads it (see `src/state.ts`).
+
+## When the Release workflow fails
+
+- **Before Create Release** (version, required checks, `dist/`): nothing was
+  published. Fix the cause (wait for the checks, or merge a rebuilt `dist/`) and
+  run the workflow again with the same version.
+- **In Move Major Tag**: the `vX.Y.Z` release exists but `v0` still points to
+  the previous one. Do not run the workflow again with the same version (the tag
+  exists); move `v0` by hand with the commands above, using the new version.
 
 ## Confirm the fix
 

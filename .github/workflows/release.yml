@@ -1,0 +1,123 @@
+# Cuts a release from the current main commit: validates the version, checks
+# that the commit passed the required checks and that dist/ matches the
+# sources, creates the vX.Y.Z tag and GitHub release with generated notes
+# (categories in .github/release.yml), then moves the major tag (v0, v1, ...)
+# that most workflows pin.
+#
+# Run it from the Actions tab (Release > Run workflow) on main.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release, in vX.Y.Z format (e.g. v0.3.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # All tags, to find the latest release.
+          fetch-depth: 0
+
+      - name: Validate Version
+        id: version
+        run: |
+          if ! [[ "$VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::'$VERSION' is not in vX.Y.Z format"
+            exit 1
+          fi
+          if git rev-parse --quiet --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "::error::Tag $VERSION already exists"
+            exit 1
+          fi
+          latest=$(git tag --list 'v*' --sort=-v:refname |
+            { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | head -n 1)
+          if [ -n "$latest" ] &&
+            [ "$(printf '%s\n%s\n' "$latest" "$VERSION" | sort -V | tail -n 1)" != "$VERSION" ]; then
+            echo "::error::$VERSION is not newer than the latest release $latest"
+            exit 1
+          fi
+          echo "Latest release: ${latest:-none}"
+          echo "major=${VERSION%%.*}" >> "$GITHUB_OUTPUT"
+
+      # The same checks the main ruleset requires for pull requests.
+      - name: Check Required Checks
+        run: |
+          failed=0
+          for check in 'TypeScript Tests' 'Check dist/' 'Analyze (typescript)'; do
+            conclusion=$(gh api --method GET \
+              "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs" \
+              -f check_name="$check" \
+              --jq '.check_runs[0].conclusion // "missing"')
+            echo "$check: $conclusion"
+            if [ "$conclusion" != success ]; then
+              echo "::error::'$check' is '$conclusion' on $GITHUB_SHA; wait for it to pass, then run the release again"
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify dist/
+        run: |
+          rm -rf dist
+          bun run bundle
+          if ! git diff --quiet --ignore-space-at-eol --text -- dist/; then
+            echo "::error::dist/ does not match the sources on $GITHUB_SHA"
+            git diff --stat -- dist/
+            exit 1
+          fi
+          bun run check:bundle
+
+      - name: Create Release
+        run: |
+          gh release create "$VERSION" \
+            --target "$GITHUB_SHA" \
+            --title "Release $VERSION" \
+            --generate-notes
+
+      # Major tags are moved, never deleted, so workflows pinned to them keep
+      # resolving. A failure here leaves the release in place; move the tag by
+      # hand as described in the release rollback runbook.
+      - name: Move Major Tag
+        env:
+          MAJOR: ${{ steps.version.outputs.major }}
+        run: |
+          git tag --force "$MAJOR" "$GITHUB_SHA"
+          git push --force origin "refs/tags/$MAJOR"
+          {
+            echo "### Released $VERSION"
+            echo
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- \`$MAJOR\` now points to $VERSION"
+            echo "- Notes: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$VERSION"
+          } >> "$GITHUB_STEP_SUMMARY"

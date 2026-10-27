@@ -100,8 +100,13 @@ The full scenario list and what to check is in
   update both `action.yml` and the tables in `README.md`.
 - **Commit messages** follow the Conventional Commits style used in the history,
   e.g. `fix: review full PR diff after interrupted CI sessions`.
-- Releases are cut by the maintainer with `script/release`, which tags `vX.Y.Z`
-  and moves the major tag `v1`.
+- **Releases** are cut by the maintainer from the Actions tab: **Release** >
+  **Run workflow** on `main` with a version such as `v0.3.0`. The workflow
+  (`.github/workflows/release.yml`) checks that the commit passed the required
+  checks and that `dist/` matches the sources, creates the `vX.Y.Z` tag and a
+  GitHub release with generated notes, and moves the major tag (`v0`) to it. The
+  notes are grouped by the `type:` labels (`.github/release.yml`), so label pull
+  requests before merging them.
 
 ## Issues and labels
 

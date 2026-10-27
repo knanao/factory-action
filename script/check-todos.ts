@@ -65,7 +65,7 @@ function isCode(path: string): boolean {
   if (EXCLUDED_PREFIXES.some((prefix) => path.startsWith(prefix))) return false
   if (CODE_EXTENSIONS.has(extname(path))) return true
   if (basename(path) === 'Dockerfile') return true
-  // Extensionless executables such as script/release and .githooks/*.
+  // Extensionless executables such as .githooks/*.
   return extname(path) === '' && readTracked(path)?.startsWith('#!') === true
 }
 

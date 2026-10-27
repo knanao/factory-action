@@ -101,8 +101,6 @@ same checks.
 - `examples/` — user-facing example workflows (mention, CI review, cleanup,
   Environment cleanup, QA, security audit, wiki).
 - `dist/` — the committed bundle the action runs. Generated; see below.
-- `script/release` — maintainer release helper (tags `vX.Y.Z` plus the major
-  tag).
 - `script/check-*.ts` — repository checks run with Bun (file sizes, tech-debt
   markers, bundle budget); `script/lib/` holds their shared helpers.
   `script/install-hooks.sh` enables the Git hooks.
@@ -111,10 +109,13 @@ same checks.
 - `.githooks/` — the checked-in pre-commit hook.
 - `.github/workflows/` — CI (format, lint, typecheck, static checks, test),
   `check-dist.yml` (fails when `dist/` is stale or over its size budget),
-  CodeQL, licensed, and `factory.yml`, which runs this action on itself for
-  `@factory` mentions.
-- `.github/` also holds `CODEOWNERS`, `dependabot.yml`, the pull request
-  template and the issue forms (`ISSUE_TEMPLATE/`).
+  CodeQL, licensed, `factory.yml`, which runs this action on itself for
+  `@factory` mentions, and `release.yml`, the manually run release (checks the
+  commit, tags `vX.Y.Z`, publishes the GitHub release with generated notes and
+  moves the major tag).
+- `.github/` also holds `CODEOWNERS`, `dependabot.yml`, `release.yml` (release
+  note categories by `type:` label), the pull request template and the issue
+  forms (`ISSUE_TEMPLATE/`).
 
 ### Module boundaries
 

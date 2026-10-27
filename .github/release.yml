@@ -1,0 +1,30 @@
+# Categories for the release notes GitHub generates (the Release workflow and
+# "Generate release notes" on the releases page), keyed by the `type:` labels
+# in CONTRIBUTING.md. A pull request goes into the first category that matches.
+# See: https://docs.github.com/repositories/releasing-projects-on-github/automatically-generated-release-notes
+changelog:
+  exclude:
+    labels:
+      - duplicate
+      - invalid
+      - wontfix
+  categories:
+    - title: Security
+      labels:
+        - 'type: security'
+    - title: Features
+      labels:
+        - 'type: feature'
+    - title: Bug fixes
+      labels:
+        - 'type: bug'
+    - title: Documentation
+      labels:
+        - 'type: docs'
+    - title: Maintenance
+      labels:
+        - 'type: chore'
+        - 'type: test'
+    - title: Other changes
+      labels:
+        - '*'

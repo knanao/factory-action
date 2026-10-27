@@ -1,7 +1,6 @@
 {
   "name": "factory-action",
   "description": "Delegate tasks, code reviews and security reviews from GitHub to Factory Droid via the Sessions API",
-  "version": "0.1.0",
   "author": "knanao",
   "type": "module",
   "private": true,
