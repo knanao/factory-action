@@ -2,9 +2,9 @@
 
 Delegate work from GitHub to [Factory](https://factory.ai) Droid through the [Sessions API](https://docs.factory.com/api-reference/sessions).
 
-- **Task delegation.** Comment `@factory <anything>` on an issue or PR and Droid does it: implement, fix, explain, run skills and commands such as `security-review` or `verify`, and so on. Follow-up comments continue **the same session**.
+- **Task delegation.** Comment `@factory <anything>` on an issue or PR and Droid does it: implement, fix, explain, run skills and commands such as `security-review` or `verify`. Follow-up comments continue **the same session**.
 - **CI jobs.** Automatic code review, diff security review (`security-review` skill) and opt-in QA (`qa` skill) on every PR push. After a push, the same session reviews only the new commits.
-- **Isolated Environment mode.** Use a Factory Environment to provision one unlisted computer per issue/PR and lane. The action reuses it for follow-ups and deletes it when the thread closes.
+- **Isolated Environment mode.** Use a Factory Environment to provision one unlisted computer per issue/PR and lane, reused for follow-ups and deleted when the thread closes.
 - **Fire-and-forget.** The action creates or reuses a session, sends one message and exits within seconds. Droid runs on your Droid Computer and writes results (PRs, comments, reviews) to GitHub itself.
 - **Quiet for outsiders.** Authorization uses `author_association`, so mentions from outside users don't start the job.
 
@@ -12,38 +12,25 @@ Delegate work from GitHub to [Factory](https://factory.ai) Droid through the [Se
 
 Factory's official [droid-action](https://github.com/Factory-AI/droid-action) is a good fit for reviewing PRs on the runner. This action exists because we needed four things it does not do:
 
-| Problem in droid-action | factory-action |
+| droid-action | factory-action |
 | --- | --- |
 | **Runs on the runner.** It installs the Droid CLI and runs `droid exec` inside the job. The runner is busy until Droid finishes, and the job needs the repo's tooling. | Calls the Sessions API and exits within seconds. Droid works on a persistent Droid Computer that already has the repo, its dependencies and tools (browser, `ffmpeg`). |
 | **Review only.** `@droid` supports `fill`, `review`, `security` and `security --full`. A bare `@droid` also starts a review. You cannot ask it to implement or fix something. | `@factory <anything>` delegates any task: implement an issue, fix a review comment, explain code, run a skill or a plugin command. |
 | **No session reuse.** Every run starts a new `droid exec`. A follow-up instruction or a re-review after new commits starts from zero. | One session per (repository, issue/PR, lane). Follow-up comments continue that session, and a re-review after a push looks only at the new commits. |
 | **Authorization is a permission check only.** It checks write permission after the job has already started, so a mention from an outside user still starts a run and shows noise. | Uses `author_association` in the workflow's `if:` (the job never starts) and in the action, then falls back to the permission API for private org members. |
 
-The trade-offs: this action needs the Sessions API, which is enabled only for some Factory organizations, and a Droid Computer.
-
 ## How it works
 
-```
-GitHub event ─▶ workflow job (if: author_association filter)
-                  │
-                  ▼
-           factory-action (node24, seconds)
-             1. normalize the event, check the trigger, authorize
-             2. read the lane's session and computer from its tracking comment
-             3. reuse them, or create an Environment computer and session
-             4. POST the message, update the tracking comment, exit
-                  │
-                  ▼
-           Droid Computer (computer-id or Environment-created)
-             runs the task / review / security review with skills,
-             writes back to GitHub with gh and git
-```
-
-Sessions are keyed by **(repository, issue/PR number, lane)**. The lane defaults to the mode (`task` for mentions), so a human task, the code review and the security review on one PR each keep their own context. The mapping is stored in a hidden marker in a tracking comment that the action writes. Only comments written by the action's own token identity are trusted.
+1. **Filter before the job starts.** The example workflows check `author_association` and the trigger phrase in the job's `if:`, so noise from outside users never starts a runner.
+2. **Parse and authorize.** The action normalizes the webhook event into a trigger, skips bots, drafts and fork PRs, and authorizes the sender by `author_association`, with the permission API as a fallback for private org members. Skips are quiet and reported through the `skipped` output.
+3. **Find the lane's session.** Sessions are keyed by **(repository, issue/PR number, lane)**, and the lane defaults to the mode (`task` for mentions), so a human task, the code review and the security review on one PR each keep their own context. The mapping lives in a hidden marker inside a tracking comment the action writes; only comments written by the action's own token identity are trusted.
+4. **Reuse or create.** With `computer-id`, the action reuses the lane's session on that computer, or creates one. With `environment-id`, it first finds the lane's Environment computer by its deterministic name (or creates it and waits for it to become active), then reuses or creates the session on it.
+5. **Send one message and exit.** The action adds a reaction to the triggering comment, posts a single prompt (the mention text, or the mode's prompt with the diff and thread context), updates the tracking comment and finishes within seconds. The workflow run does not wait for Droid, so the check status never reflects the result.
+6. **Droid does the work.** Droid runs the task on the computer with its skills and tools, and writes results back to GitHub (PRs, comments, reviews) with the computer's own `gh` and `git` credentials. Follow-up comments go to the same session.
 
 ## Prerequisites
 
-1. **The Sessions API is enabled for your Factory organization.** The docs say it is "enabled for selected organizations only", so confirm this before adopting the action.
+1. **The Sessions API is enabled for your Factory organization.** The [API reference](https://docs.factory.com/api-reference/sessions) marks every Sessions endpoint as "enabled for selected organizations only", so confirm this before adopting the action.
 2. **A Factory API key.** Prefer a [service account](https://docs.factory.com/enterprise/identity-and-access) key, so sessions and billing belong to the service account. Store it as the secret `FACTORY_API_KEY`.
 3. **A Droid Computer or Factory Environment** with the repository cloned. Store the computer ID as `FACTORY_COMPUTER_ID`, or the Environment ID as `FACTORY_ENVIRONMENT_ID`. See [Computer setup](#computer-setup) and [Environment setup](#environment-setup).
 
@@ -77,60 +64,17 @@ jobs:
           computer-id: ${{ vars.FACTORY_COMPUTER_ID }}
 ```
 
-`.github/workflows/factory-ci.yml`, for automatic review and security review:
-
-```yaml
-name: Factory CI
-on:
-  pull_request: { types: [opened, synchronize, reopened, ready_for_review] }
-permissions: {}
-jobs:
-  droid:
-    if: ${{ !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository }}
-    runs-on: ubuntu-latest
-    permissions: { pull-requests: write }
-    strategy: { matrix: { mode: [review, security] } }
-    concurrency:
-      group: factory-${{ matrix.mode }}-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
-    steps:
-      - uses: knanao/factory-action@v0.1.0
-        with:
-          factory-api-key: ${{ secrets.FACTORY_API_KEY }}
-          computer-id: ${{ vars.FACTORY_COMPUTER_ID }}
-          mode: ${{ matrix.mode }}
-```
-
-More examples are in [examples/](./examples): opt-in QA, a weekly full-repository security audit and a weekly wiki refresh.
+More workflows are in [examples/](./examples): automatic PR review and security review, opt-in QA, a weekly full-repository security audit, a weekly wiki refresh and cleanup for closed threads.
 
 ### Use a Factory Environment
 
-To isolate each issue/PR lane, replace `computer-id` with:
+To isolate each issue/PR lane on its own computer, replace `computer-id` with:
 
 ```yaml
 environment-id: ${{ vars.FACTORY_ENVIRONMENT_ID }}
 ```
 
-Use the same `environment-id` in every workflow, including cleanup. For example:
-
-```yaml
-on:
-  issues: { types: [closed] }
-  pull_request_target: { types: [closed] }
-permissions: {}
-jobs:
-  cleanup:
-    runs-on: ubuntu-latest
-    permissions: { issues: write, pull-requests: write }
-    steps:
-      - uses: knanao/factory-action@v0.2.0
-        with:
-          factory-api-key: ${{ secrets.FACTORY_API_KEY }}
-          environment-id: ${{ vars.FACTORY_ENVIRONMENT_ID }}
-          mode: cleanup
-```
-
-See [`examples/factory-environment-cleanup.yml`](examples/factory-environment-cleanup.yml) for the full workflow. Issue/PR computers are removed on close. Cleanup does not find computers for runs without an issue/PR, such as scheduled `deep-security` audits and `workflow_dispatch`; those computers remain until manually deleted in Factory. See [Environment setup](#environment-setup) for snapshot and build-script guidance.
+Use the same `environment-id` in every workflow, including cleanup. See [Environment setup](#environment-setup) for snapshot, build-script and cleanup details.
 
 ## Usage
 
@@ -157,10 +101,10 @@ Any text after `@factory` goes to Droid unchanged. To run a skill or plugin comm
 | --- | --- | --- |
 | `review` | `pull_request` | Code review of the diff, posted as one review with up to `max-comments` inline comments labeled `[P0]`–`[P2]` |
 | `security` | `pull_request` | `/security-review` on the diff. Inline `[P0]`–`[P2] [security]` findings; P3 findings go only in the summary |
-| `deep-security` | `schedule`, `workflow_dispatch` | `/deep-security-review` on the whole repository at the default branch. Findings go only to **draft security advisories** (see below) |
-| `wiki` | `schedule`, `workflow_dispatch` | `/wiki` on the whole repository at the default branch. Uploaded to the Factory app, and the same pages pushed to `droid-wiki/` on the default branch (see below) |
+| `deep-security` | `schedule`, `workflow_dispatch` | `/deep-security-review` on the whole repository (see below) |
+| `wiki` | `schedule`, `workflow_dispatch` | `/wiki` on the whole repository (see below) |
 | `qa` | `pull_request` | `/qa` on the changed flows, posted as a pass/fail/blocked report. Opt-in, see [QA](#qa-and-droid-control) |
-| `cleanup` | `issues` / `pull_request_target` (`closed`) | With `computer-id`, asks tracked sessions to remove their worktrees and local branches. With `environment-id`, deletes the thread's Environment computers directly. See [Computer setup](#computer-setup) |
+| `cleanup` | `issues` / `pull_request_target` (`closed`) | With `computer-id`, asks tracked sessions to remove their worktrees and local branches. With `environment-id`, deletes the thread's Environment computers |
 | `custom` | any (e.g. `schedule`) | Sends the `prompt` input with the repository/thread context |
 
 - Drafts are skipped.
@@ -189,16 +133,13 @@ The `wiki` skill generates comprehensive documentation for the whole repository,
 - The session removes its own worktree when it finishes: scheduled runs have no issue or PR whose close would trigger `cleanup`.
 - The computer's push credentials must be allowed to push to the default branch.
 
+See [`examples/factory-wiki.yml`](examples/factory-wiki.yml).
+
 ### UI changes need before/after evidence
 
-When Droid opens or pushes to a PR that changes what people see rendered (the app's web, desktop or terminal screens, or output GitHub renders, such as comments, summaries or generated HTML), it must:
+When Droid opens or updates a PR that changes what people see rendered (app screens, or output GitHub renders such as comments and summaries), it captures the same view before and after, uploads the evidence with the computer's `gh` credentials and embeds it in the PR body or a comment: PNG screenshots for static changes, MP4 (under 10 MB) plus GIF for interactions. If the evidence cannot be captured, it leaves the PR as a **draft** and explains why.
 
-1. Capture the same view before and after: for app screens, run the app on the base branch and on its branch; for output Droid cannot run for real (rendered by GitHub or CI), render the actual output the code produces and caption how it was made. PNG screenshots for static changes, MP4 (under 10 MB) plus GIF for interactions. Skip evidence only when a plain diff shows the effect just as well.
-2. Upload each file to GitHub's user-attachments storage with the computer's `gh` credentials (`https://uploads.github.com/user-attachments/assets`) and embed the returned URL. Images, GIFs and videos all render inline, and nothing lands in any branch, so the PR diff stays clean.
-3. Put the **Before / After** section in the PR body when opening the PR, and post it as a comment when pushing updates to an existing PR.
-4. If the evidence cannot be captured, leave the PR as a **draft** and explain why.
-
-This is enforced through the session's system prompt. It needs the Droid Control tools on the computer, see [Computer setup](#computer-setup).
+This is enforced through the session's system prompt and needs the Droid Control tools on the computer, see [Computer setup](#computer-setup).
 
 ## Inputs
 
@@ -257,34 +198,34 @@ This is enforced through the session's system prompt. It needs the Droid Control
 
 ### Environment setup
 
-Use an organization Environment, especially when the workflow uses a service-account API key. Clone the target repository and install its dependencies in the Environment setup steps. Install Droid Control and its runtime tools there if the workflow uses UI evidence, `verify`, `qa-test` or `qa`.
+Use an organization Environment, especially when the workflow uses a service-account API key. Clone the target repository and install its dependencies in the Environment setup steps. If the workflow uses UI evidence, `verify`, `qa-test` or `qa`, install the Droid Control tools there as well (see [Computer setup](#computer-setup)).
 
 Build scripts should leave tracked files unchanged. For example, use the repository's lockfile-based install (`npm ci`, `bun install --frozen-lockfile`, or the equivalent), not commands that rewrite `package.json` or the lockfile. Environment build steps do not receive Runtime secrets. The Environment is a snapshot: computers created from it keep their own state, and rebuilding the Environment does not update existing computers. New issues/PRs use the newer snapshot.
 
-The action creates one persistent, unlisted computer per issue/PR and lane. Follow-ups reuse that computer; closing the issue/PR deletes it. Runs without an issue/PR (including scheduled deep-security audits and manual dispatches) are not covered by cleanup. Delete those computers manually from Factory until an automatic sweep mode is available.
+The action creates one persistent, unlisted computer per issue/PR and lane, found again by its deterministic name. Follow-ups reuse that computer; closing the issue/PR deletes it (see [`examples/factory-environment-cleanup.yml`](examples/factory-environment-cleanup.yml)). Runs without an issue/PR, such as scheduled `deep-security` audits and `workflow_dispatch`, are not covered by cleanup; delete those computers manually from Factory until an automatic sweep mode is available.
 
-The first run waits for the computer to become active, up to `provision-timeout-sec` (300 seconds by default). If a run is cancelled during provisioning, the next run finds the same computer by its deterministic name and resumes waiting instead of creating a duplicate.
+The first run waits for the computer to become active, up to `provision-timeout-sec` (300 seconds by default). If a run is cancelled during provisioning, the next run finds the same computer and resumes waiting instead of creating a duplicate.
 
 ## QA and Droid Control
 
 Skills and Droid Control commands run through mentions, named without a slash (see [Mentions](#mentions-mode-mention-default)). CI modes cover the ones that need no conversation.
 
-| Feature | Kind | What it does | Use it when | How to use | Notes |
-| --- | --- | --- | --- | --- | --- |
-| Code review | built-in skill | Reviews the diff for bugs, security problems and breaking changes | Every PR | `mode: review`, or `@factory review this PR` | Prompt-based. `review` is not a command name, because `/review` opens an interactive menu |
-| `security-review` | built-in skill | Security review of the diff (data flows, authn/authz, injection, …) | Every PR | `mode: security`, or `@factory security-review` | Static analysis; no special requirements |
-| `deep-security-review` | built-in skill | Multi-phase audit of the whole repository | Periodic audits, e.g. weekly | `mode: deep-security` (scheduled), or `@factory deep-security-review` | Can take hours. Findings go to draft security advisories. In a mention, its questions come back as comments |
-| `wiki` | built-in skill | Comprehensive documentation of the whole repository, uploaded to the Factory app | Keeping onboarding docs fresh without writing them by hand | `mode: wiki` (scheduled), or `@factory wiki` | The pages are also pushed to `droid-wiki/` on the default branch. The video overview is skipped by default |
-| `qa` | repository skill | Runs the repository's own QA flows (created by `/install-qa`) against what the PR changed | Every PR, for apps with flows that must not break (login, checkout, …) | `mode: qa` (opt-in), or `@factory qa` | Run `/install-qa` once and commit `.factory/skills/qa*`. The app must be reachable from the computer. Without the skill, Droid posts setup steps and stops |
-| `verify` | Droid Control | Checks **one claim** by running the app, and reports CONFIRMED / REFUTED / INCONCLUSIVE with evidence | "Is this bug really fixed?", "Does this bug report reproduce?" | `@factory verify 1234 -- saving keeps the form values` | Droid acts as an investigator: a refuted claim is a valid result |
-| `qa-test` | Droid Control | Plans and runs test steps against a URL, CLI or Electron app, with a pass/fail table per step | Trying a feature end to end, as a person would by hand. Broader than `verify` | `@factory qa-test https://staging.example.com -- log in, create a project` | Droid designs the steps if none are given. Questions come back as comments; reply with `@factory ...` in the same session |
-| `demo` | Droid Control | Records a demo video of a feature or PR, side by side for before/after changes | Videos for PR descriptions or release notes | `@factory demo 1234` | **Experimental.** It waits for plan approval: reply `@factory approve` to continue |
+| Feature | What it does | How to use | Notes |
+| --- | --- | --- | --- |
+| Code review (built-in skill) | Reviews the diff for bugs, security problems and breaking changes. Run it on every PR | `mode: review`, or `@factory review this PR` | Prompt-based; `review` is not a `commands` name (see [Mentions](#mentions-mode-mention-default)) |
+| `security-review` (built-in skill) | Security review of the diff (data flows, authn/authz, injection, …). Run it on every PR | `mode: security`, or `@factory security-review` | Static analysis; no special requirements |
+| `deep-security-review` (built-in skill) | Multi-phase audit of the whole repository, for periodic audits | `mode: deep-security` (scheduled), or `@factory deep-security-review` | Can take hours. Findings go to draft security advisories, see [CI modes](#ci-modes). In a mention, its questions come back as comments |
+| `wiki` (built-in skill) | Comprehensive documentation of the whole repository, uploaded to the Factory app | `mode: wiki` (scheduled), or `@factory wiki` | The pages are also pushed to `droid-wiki/` on the default branch, see [CI modes](#ci-modes) |
+| `qa` (repository skill) | Runs the repository's own QA flows (created by `/install-qa`) against what the PR changed | `mode: qa` (opt-in), or `@factory qa` | Run `/install-qa` once and commit `.factory/skills/qa*`. The app must be reachable from the computer. Without the skill, Droid posts setup steps and stops |
+| `verify` (Droid Control) | Checks **one claim** by running the app, and reports CONFIRMED / REFUTED / INCONCLUSIVE with evidence | `@factory verify 1234 -- saving keeps the form values` | For "is this bug really fixed?" and "does this report reproduce?". A refuted claim is a valid result |
+| `qa-test` (Droid Control) | Plans and runs test steps against a URL, CLI or Electron app, with a pass/fail table per step | `@factory qa-test https://staging.example.com -- log in, create a project` | Broader than `verify`. Droid designs the steps if none are given. Questions come back as comments |
+| `demo` (Droid Control) | Records a demo video of a feature or PR, side by side for before/after changes | `@factory demo 1234` | **Experimental.** It waits for plan approval: reply `@factory approve` to continue |
 
 In short: `verify` checks one point, `qa-test` walks through a flow, `qa` runs the repository's QA on every PR, and `demo` makes a video to show.
 
 Droid also picks a matching skill on its own when the request fits the skill's description, so plain requests such as "check this for security issues" often work. Name the skill (`@factory security-review`) when it must run every time, and in CI, where the modes always name it.
 
-Droid Control commands need the plugin and its tools on the computer ([Computer setup](#computer-setup)). To use another skill or plugin command this way, add its name to the `commands` input.
+Droid Control commands need the plugin and its tools on the computer (see [Computer setup](#computer-setup)). To use another skill or plugin command this way, add its name to the `commands` input.
 
 ## Security
 
@@ -294,7 +235,7 @@ Droid Control commands need the plugin and its tools on the computer ([Computer 
 - **Prompt injection.** GitHub content is passed as clearly delimited untrusted data, and the system prompt tells Droid not to follow instructions in it. Use a dedicated computer and least-privilege GitHub credentials. Remember that `autonomy-level: high` lets Droid run commands and push.
 - **Why `autonomy-level: high`.** Below `high`, a command Droid rates as high-risk (e.g. `git push`, `git branch -D`) waits for an approval that never comes, and the session stays `running` until it is interrupted. Autonomy is fixed when the session is created; changing it later does not affect a reused session.
 - **No secrets to Droid.** The workflow token is used only for the reaction and the tracking comment.
-- **Data handling.** The action sends the thread's title and URL, the triggering text and the requester's login (mentions) or the PR description (`review`, `security`, `qa`) to the Factory API and nowhere else. The tracking comment stores only the lane, session ID, last head SHA and Environment computer ID, and the log contains logins and IDs but no comment text. Do not put secrets or personal data in requests to Droid. See [Data handling and personal data](./SECURITY.md#data-handling-and-personal-data) for the details, retention and deletion.
+- **Data handling.** The action sends the thread's title and URL, the triggering text and the requester's login (mentions) or the PR description (`review`, `security`, `qa`) to the Factory API and nowhere else; the tracking comment stores only IDs and SHAs. Do not put secrets or personal data in requests to Droid. See [Data handling and personal data](./SECURITY.md#data-handling-and-personal-data) for the details, retention and deletion.
 
 ## Limitations
 
