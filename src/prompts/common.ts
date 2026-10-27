@@ -84,11 +84,12 @@ export function header(ctx: PromptContext): string {
 
 /**
  * Wraps untrusted GitHub content so it is clearly data, not instructions.
- * Closing tags inside the content are neutralized.
+ * Opening and closing tags inside the content are neutralized.
  */
 export function untrusted(source: string, content: string | undefined): string {
-  const safe = (content ?? '').replace(/<\/?untrusted-github-content/gi, (m) =>
-    m.replace('<', '&lt;')
+  const safe = (content ?? '').replace(
+    /<(\/?untrusted-github-content)/gi,
+    '&lt;$1'
   )
   return `<untrusted-github-content source="${source}">\n${safe.trim() || '(empty)'}\n</untrusted-github-content>`
 }

@@ -23453,7 +23453,7 @@ function header(ctx) {
 `);
 }
 function untrusted(source, content) {
-  const safe = (content ?? "").replace(/<\/?untrusted-github-content/gi, (m) => m.replace("<", "&lt;"));
+  const safe = (content ?? "").replace(/<(\/?untrusted-github-content)/gi, "&lt;$1");
   return `<untrusted-github-content source="${source}">
 ${safe.trim() || "(empty)"}
 </untrusted-github-content>`;
@@ -24165,5 +24165,5 @@ async function run() {
 // src/index.ts
 run();
 
-//# debugId=361DBDEF5486381A64756E2164756E21
+//# debugId=E7AFCF0D28D882F864756E2164756E21
 //# sourceMappingURL=index.js.map
