@@ -60,13 +60,13 @@
     "@types/bun": "^1.4.4",
     "@types/node": "^26.6.6",
     "@typescript/native": "npm:typescript@^7.0.2",
-    "@typescript-eslint/eslint-plugin": "^8.72.1",
-    "@typescript-eslint/parser": "^8.72.1",
-    "dependency-cruiser": "^18.7.1",
-    "eslint": "^10.14.0",
+    "@typescript-eslint/eslint-plugin": "^8.72.2",
+    "@typescript-eslint/parser": "^8.72.2",
+    "dependency-cruiser": "^18.7.2",
+    "eslint": "^10.15.0",
     "globals": "^17.14.0",
-    "jscpd": "^5.4.2",
-    "knip": "^6.44.1",
+    "jscpd": "^5.4.3",
+    "knip": "^6.45.1",
     "typescript": "npm:@typescript/typescript6@^6.0.2"
   }
 }
